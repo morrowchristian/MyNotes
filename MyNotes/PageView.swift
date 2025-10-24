@@ -8,7 +8,11 @@ struct PageView: View {
     @State private var selectedBlockType: BlockType = .text
     @State private var newContent: String = ""
     @State private var currentMonth = Date()
-    
+    @State private var showingEventSheet = false
+    @State private var selectedDate: Date?
+    @State private var eventText: String = ""
+    @State private var editingBlock: Block?
+
     var body: some View {
         VStack {
             TextField("Title", text: $page.title)
@@ -44,6 +48,38 @@ struct PageView: View {
             .padding()
         }
         .navigationTitle(page.title)
+        .sheet(isPresented: $showingEventSheet) {
+            EventEditSheet(
+                date: selectedDate!,
+                text: $eventText,
+                onSave: { text in
+                    guard let block = editingBlock else { return }
+                    let dateKey = selectedDate!.startOfDay
+                    if text.isEmpty {
+                        if var pageBlocks = appData.pages.first(where: { $0.id == page.id })?.blocks {
+                            if let idx = pageBlocks.firstIndex(where: { $0.id == block.id }) {
+                                pageBlocks[idx].events.removeValue(forKey: dateKey)
+                                if let pageIdx = appData.pages.firstIndex(where: { $0.id == page.id }) {
+                                    appData.pages[pageIdx].blocks = pageBlocks
+                                }
+                            }
+                        }
+                    } else {
+                        if var pageBlocks = appData.pages.first(where: { $0.id == page.id })?.blocks {
+                            if let idx = pageBlocks.firstIndex(where: { $0.id == block.id }) {
+                                pageBlocks[idx].events[dateKey] = text
+                                if let pageIdx = appData.pages.firstIndex(where: { $0.id == page.id }) {
+                                    appData.pages[pageIdx].blocks = pageBlocks
+                                }
+                            }
+                        }
+                    }
+                    editingBlock = nil
+                    selectedDate = nil
+                    eventText = ""
+                }
+            )
+        }
     }
     
     @ViewBuilder
@@ -61,39 +97,57 @@ struct PageView: View {
     private func calendarBlockView(block: Binding<Block>) -> some View {
         VStack {
             HStack {
-                Button("<") { currentMonth = Calendar.current.date(byAdding: .month, value: -1, to: currentMonth)! }
+                Button("<") {
+                    currentMonth = Calendar.current.date(byAdding: .month, value: -1, to: currentMonth)!
+                }
+                Spacer()
                 Text(currentMonth, format: .dateTime.year().month())
-                Button(">") { currentMonth = Calendar.current.date(byAdding: .month, value: 1, to: currentMonth)! }
+                    .font(.headline)
+                Spacer()
+                Button(">") {
+                    currentMonth = Calendar.current.date(byAdding: .month, value: 1, to: currentMonth)!
+                }
             }
+            .padding(.horizontal)
             
             let days = generateDaysInMonth(for: currentMonth)
-            LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 7)) {
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 7), spacing: 8) {
                 ForEach(["S", "M", "T", "W", "T", "F", "S"], id: \.self) { day in
-                    Text(day).font(.headline)
+                    Text(day)
+                        .font(.caption)
+                        .foregroundColor(.secondary)
                 }
                 ForEach(days, id: \.self) { date in
                     if let date = date {
-                        let event = block.wrappedValue.events[date.startOfDay] ?? ""
-                        Button(action: { editEvent(for: date, in: block) }) {
-                            VStack {
+                        let hasEvent = block.wrappedValue.events[date.startOfDay] != nil
+                        Button {
+                            openEventEditor(for: date, in: block.wrappedValue)
+                        } label: {
+                            VStack(spacing: 2) {
                                 Text("\(Calendar.current.component(.day, from: date))")
-                                if !event.isEmpty {
-                                    Circle().fill(Color.blue).frame(width: 5, height: 5)
+                                    .font(.system(size: 14))
+                                if hasEvent {
+                                    Circle()
+                                        .fill(Color.blue)
+                                        .frame(width: 6, height: 6)
                                 }
                             }
-                            .frame(maxWidth: .infinity)
-                            .padding(8)
-                            .background(isToday(date) ? Color.gray.opacity(0.3) : Color.clear)
+                            .frame(maxWidth: .infinity, minHeight: 40)
+                            .background(
+                                RoundedRectangle(cornerRadius: 8)
+                                    .fill(isToday(date) ? Color.blue.opacity(0.2) : Color.clear)
+                            )
                         }
                     } else {
-                        Text("")  // Spacer for offset
+                        Color.clear.frame(height: 40)
                     }
                 }
             }
+            .padding(.horizontal)
         }
         .padding()
-        .background(Color.gray.opacity(0.1))
-        .cornerRadius(8)
+        .background(Color(.systemGray6))
+        .cornerRadius(12)
     }
     
     private func addBlock() {
@@ -105,31 +159,26 @@ struct PageView: View {
         newContent = ""
     }
     
-    private func editEvent(for date: Date, in block: Binding<Block>) {
-        // Simple alert for editing
-        let alert = UIAlertController(title: "Event for \(date.formatted(date: .abbreviated, time: .omitted))", message: nil, preferredStyle: .alert)
-        alert.addTextField { textField in
-            textField.text = block.wrappedValue.events[date.startOfDay] ?? ""
-        }
-        alert.addAction(UIAlertAction(title: "Save", style: .default) { _ in
-            let text = alert.textFields?[0].text ?? ""
-            if text.isEmpty {
-                block.events.removeValue(forKey: date.startOfDay)
-            } else {
-                block.events[date.startOfDay] = text
-            }
-        })
-        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
-        UIApplication.shared.windows.first?.rootViewController?.present(alert, animated: true)
+    private func openEventEditor(for date: Date, in block: Block) {
+        selectedDate = date
+        eventText = block.events[date.startOfDay] ?? ""
+        editingBlock = block
+        showingEventSheet = true
     }
     
     private func generateDaysInMonth(for date: Date) -> [Date?] {
-        guard let range = Calendar.current.range(of: .day, in: .month, for: date) else { return [] }
-        let days = (1...range.count).map { day in
-            Calendar.current.date(bySetting: .day, value: day, of: date)!
+        guard
+            let monthInterval = Calendar.current.dateComponents([.year, .month], from: date).date,
+            let daysInMonth = Calendar.current.range(of: .day, in: .month, for: monthInterval)
+        else { return [] }
+        
+        let firstDay = monthInterval
+        let weekday = Calendar.current.component(.weekday, from: firstDay) - 1
+        let days = daysInMonth.compactMap { day -> Date? in
+            Calendar.current.date(bySetting: .day, value: day, of: monthInterval)
         }
-        let firstWeekday = Calendar.current.component(.weekday, from: days.first!) - 1
-        return Array(repeating: nil, count: firstWeekday) + days
+        
+        return Array(repeating: nil, count: weekday) + days
     }
     
     private func isToday(_ date: Date) -> Bool {
@@ -137,6 +186,37 @@ struct PageView: View {
     }
 }
 
+// MARK: - Event Edit Sheet
+struct EventEditSheet: View {
+    let date: Date
+    @Binding var text: String
+    let onSave: (String) -> Void
+    @Environment(\.dismiss) var dismiss
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Event for \(date.formatted(date: .abbreviated, time: .omitted))") {
+                    TextField("Enter event...", text: $text)
+                }
+            }
+            .navigationTitle("Edit Event")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save") {
+                        onSave(text)
+                        dismiss()
+                    }
+                }
+            }
+        }
+    }
+}
+
+// MARK: - Date Extension
 extension Date {
     var startOfDay: Date {
         Calendar.current.startOfDay(for: self)
