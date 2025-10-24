@@ -111,3 +111,7 @@ This is a work in progress — help, suggestions, and ideas are always welcome!
 It’s my **first iOS app** and my **first project written in Swift**, so any pointers are appreciated.
 
 **Made by [Christian Morrow](https://github.com/morrowchristian)**
+
+## License
+
+[MIT License](LICENSE) – Free to use, modify, and share.
