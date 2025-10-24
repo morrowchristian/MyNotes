@@ -11,22 +11,27 @@ struct PageView: View {
     @State private var showingEventSheet = false
     @State private var selectedDate: Date?
     @State private var eventText: String = ""
-    @State private var editingBlock: Block?
-
+    @State private var editingBlockID: UUID?
+    
     var body: some View {
         VStack {
-            TextField("Title", text: $page.title)
-                .font(.largeTitle)
-                .multilineTextAlignment(.center)
-                .padding(.bottom)
+            VStack(alignment: .leading) {
+                TextField("Title", text: $page.title)
+                    .font(.largeTitle)
+                Text("Created: \(AppData.formatTimestamp(page.createdAt))")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.bottom)
             
-            List {
-                ForEach($page.blocks) { $block in
-                    blockView(for: $block)
-                }
-                .onDelete { indices in
-                    page.blocks.remove(atOffsets: indices)
-                }
+            List($page.blocks) { $block in
+                blockView(for: $block)
+            }
+            .onDelete { indices in
+                page.blocks.remove(atOffsets: indices)
+            }
+            .onMove { indices, newOffset in
+                page.blocks.move(fromOffsets: indices, toOffset: newOffset)
             }
             
             HStack {
@@ -35,7 +40,7 @@ struct PageView: View {
                         Text(type.rawValue.capitalized).tag(type)
                     }
                 }
-                .pickerStyle(MenuPickerStyle())
+                .pickerStyle(.menu)
                 
                 if selectedBlockType != .calendar {
                     TextField("Content...", text: $newContent)
@@ -46,37 +51,24 @@ struct PageView: View {
                 }
             }
             .padding()
+            .background(Color(.systemBackground))
         }
         .navigationTitle(page.title)
         .sheet(isPresented: $showingEventSheet) {
             EventEditSheet(
-                date: selectedDate!,
+                date: selectedDate ?? Date(),
                 text: $eventText,
                 onSave: { text in
-                    guard let block = editingBlock else { return }
-                    let dateKey = selectedDate!.startOfDay
+                    guard let blockID = editingBlockID,
+                          let pageIndex = appData.pages.firstIndex(where: { $0.id == page.id }),
+                          let blockIndex = appData.pages[pageIndex].blocks.firstIndex(where: { $0.id == blockID }) else { return }
+                    
+                    let dateKey = selectedDate?.startOfDay ?? Date().startOfDay
                     if text.isEmpty {
-                        if var pageBlocks = appData.pages.first(where: { $0.id == page.id })?.blocks {
-                            if let idx = pageBlocks.firstIndex(where: { $0.id == block.id }) {
-                                pageBlocks[idx].events.removeValue(forKey: dateKey)
-                                if let pageIdx = appData.pages.firstIndex(where: { $0.id == page.id }) {
-                                    appData.pages[pageIdx].blocks = pageBlocks
-                                }
-                            }
-                        }
+                        appData.pages[pageIndex].blocks[blockIndex].events.removeValue(forKey: dateKey)
                     } else {
-                        if var pageBlocks = appData.pages.first(where: { $0.id == page.id })?.blocks {
-                            if let idx = pageBlocks.firstIndex(where: { $0.id == block.id }) {
-                                pageBlocks[idx].events[dateKey] = text
-                                if let pageIdx = appData.pages.firstIndex(where: { $0.id == page.id }) {
-                                    appData.pages[pageIdx].blocks = pageBlocks
-                                }
-                            }
-                        }
+                        appData.pages[pageIndex].blocks[blockIndex].events[dateKey] = text
                     }
-                    editingBlock = nil
-                    selectedDate = nil
-                    eventText = ""
                 }
             )
         }
@@ -87,15 +79,22 @@ struct PageView: View {
         switch block.wrappedValue.type {
         case .text:
             TextEditor(text: block.content)
+                .frame(minHeight: 100)
+                .background(Color(.systemGray6))
+                .cornerRadius(8)
         case .todo:
-            Toggle(block.wrappedValue.content, isOn: block.isCompleted)
+            HStack {
+                Toggle("", isOn: block.isCompleted)
+                    .toggleStyle(.checkbox)
+                TextField("Task", text: block.content)
+            }
         case .calendar:
             calendarBlockView(block: block)
         }
     }
     
     private func calendarBlockView(block: Binding<Block>) -> some View {
-        VStack {
+        VStack(alignment: .leading) {
             HStack {
                 Button("<") {
                     currentMonth = Calendar.current.date(byAdding: .month, value: -1, to: currentMonth)!
@@ -144,6 +143,26 @@ struct PageView: View {
                 }
             }
             .padding(.horizontal)
+            
+            // New: Full event list below grid for "full calendar" feel
+            if !block.wrappedValue.events.isEmpty {
+                Divider()
+                Text("Events")
+                    .font(.subheadline)
+                    .padding(.top)
+                ForEach(Array(block.wrappedValue.events.sorted(by: { $0.key < $1.key })), id: \.key) { date, note in
+                    HStack {
+                        Text(date.formatted(date: .abbreviated, time: .omitted))
+                            .foregroundStyle(.secondary)
+                        Text(note)
+                        Spacer()
+                        Button("Edit") {
+                            openEventEditor(for: date, in: block.wrappedValue)
+                        }
+                        .buttonStyle(.borderless)
+                    }
+                }
+            }
         }
         .padding()
         .background(Color(.systemGray6))
@@ -162,23 +181,27 @@ struct PageView: View {
     private func openEventEditor(for date: Date, in block: Block) {
         selectedDate = date
         eventText = block.events[date.startOfDay] ?? ""
-        editingBlock = block
+        editingBlockID = block.id
         showingEventSheet = true
     }
     
     private func generateDaysInMonth(for date: Date) -> [Date?] {
         guard
-            let monthInterval = Calendar.current.dateComponents([.year, .month], from: date).date,
-            let daysInMonth = Calendar.current.range(of: .day, in: .month, for: monthInterval)
+            let monthInterval = Calendar.current.dateInterval(of: .month, for: date),
+            let daysInMonth = Calendar.current.range(of: .day, in: .month, for: date)?.count
         else { return [] }
         
-        let firstDay = monthInterval
+        let firstDay = monthInterval.start
         let weekday = Calendar.current.component(.weekday, from: firstDay) - 1
-        let days = daysInMonth.compactMap { day -> Date? in
-            Calendar.current.date(bySetting: .day, value: day, of: monthInterval)
+        var days: [Date?] = Array(repeating: nil, count: weekday)
+        
+        for day in 1...daysInMonth {
+            if let dayDate = Calendar.current.date(byAdding: .day, value: day - 1, to: firstDay) {
+                days.append(dayDate)
+            }
         }
         
-        return Array(repeating: nil, count: weekday) + days
+        return days
     }
     
     private func isToday(_ date: Date) -> Bool {
