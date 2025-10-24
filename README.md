@@ -1,8 +1,13 @@
 # MyNotes
 
+[![SwiftUI](https://img.shields.io/badge/SwiftUI-5.9%2B-orange.svg)](https://developer.apple.com/swiftui/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![iOS 17+](https://img.shields.io/badge/iOS-17%2B-lightblue.svg)](https://developer.apple.com/ios/)
+[![GitHub stars](https://img.shields.io/github/stars/yourusername/MyNotes?style=social)](https://github.com/morrowchristian/MyNotes)
+
 **A modern, block-based note-taking app for iOS (SwiftUI)**
 
-> Build your ideas with interactive layouts — **no Markdown required**.
+> Build your ideas with interactive layouts — **no Markdown needed**.
 
 <img src="https://via.placeholder.com/800x450.png?text=MyNotes+Preview" alt="App Preview" width="100%"/>
 
