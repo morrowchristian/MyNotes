@@ -2,35 +2,68 @@
 //  MyNotesTests.swift
 //  MyNotesTests
 //
-//  Created by Christian Morrow on 10/23/25.
-//
 
 import XCTest
 @testable import MyNotes
 
 final class MyNotesTests: XCTestCase {
 
-    override func setUpWithError() throws {
-        // Put setup code here. This method is called before the invocation of each test method in the class.
+    var appData: AppData!
+
+    override func setUp() {
+        super.setUp()
+        appData = AppData()
+        appData.pages = []
+        UserDefaults.standard.removeObject(forKey: "pages")
     }
 
-    override func tearDownWithError() throws {
-        // Put teardown code here. This method is called after the invocation of each test method in the class.
+    override func tearDown() {
+        appData = nil
+        super.tearDown()
     }
 
-    func testExample() throws {
-        // This is an example of a functional test case.
-        // Use XCTAssert and related functions to verify your tests produce the correct results.
-        // Any test you write for XCTest can be annotated as throws and async.
-        // Mark your test throws to produce an unexpected failure when your test encounters an uncaught error.
-        // Mark your test async to allow awaiting for asynchronous code to complete. Check the results with assertions afterwards.
+    // MARK: - Persistence
+    func testSaveAndLoadPages() {
+        let page = Page(id: UUID(), title: "Test", markdown: "# Hello")
+        appData.pages = [page]
+        appData.saveData()
+
+        let loaded = AppData()
+        XCTAssertEqual(loaded.pages.count, 1)
+        XCTAssertEqual(loaded.pages[0].title, "Test")
+        XCTAssertEqual(loaded.pages[0].markdown, "# Hello")
     }
 
-    func testPerformanceExample() throws {
-        // This is an example of a performance test case.
-        self.measure {
-            // Put the code you want to measure the time of here.
-        }
+    // MARK: - CRUD
+    func testCreateAndDeletePage() {
+        let page = Page(id: UUID(), title: "New", markdown: "")
+        appData.pages.append(page)
+        XCTAssertEqual(appData.pages.count, 1)
+
+        appData.pages.removeAll()
+        XCTAssertTrue(appData.pages.isEmpty)
     }
 
+    // MARK: - Templates
+    func testTemplateBlank() {
+        XCTAssertTrue(Template.blank.markdown.contains("# New Page"))
+    }
+
+    func testTemplateToDo() {
+        XCTAssertTrue(Template.todo.markdown.contains("- [ ] Buy milk"))
+    }
+
+    func testTemplateCalendar() {
+        XCTAssertTrue(Template.calendar.markdown.contains("2025-10-25"))
+    }
+
+    // MARK: - Markdown → AttributedString (Pure Logic)
+    func testMarkdownToAttributedString() throws {
+        let markdown = "**Bold** and *italic*"
+        let attributed = try AttributedString(markdown: markdown)
+
+        let boldRange = attributed.range(of: "Bold")
+        XCTAssertNotNil(boldRange)
+        XCTAssertTrue(attributed[boldRange!].font?.fontDescriptor.symbolicTraits.contains(.traitBold) ?? false)
+    }
 }

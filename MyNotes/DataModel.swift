@@ -1,17 +1,25 @@
-//
 //  DataModel.swift
-//  MyNotes
-//
-//  Created by Christian Morrow on 10/23/25.
-//
-
 import Foundation
 import Combine
+
+enum BlockType: String, Codable, CaseIterable {
+    case text
+    case todo
+    case calendar
+}
+
+struct Block: Identifiable, Codable {
+    let id: UUID
+    var type: BlockType
+    var content: String = ""  // For text/todo
+    var isCompleted: Bool = false  // For todo
+    var events: [Date: String] = [:]  // For calendar: date (midnight) to note
+}
 
 struct Page: Identifiable, Codable {
     let id: UUID
     var title: String
-    var markdown: String = ""          // ← NEW
+    var blocks: [Block] = []
 }
 
 class AppData: ObservableObject {
