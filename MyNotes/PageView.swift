@@ -1,9 +1,65 @@
 //  PageView.swift
 import SwiftUI
+import Combine
 
+// MARK: - Undo Coordinator (Class)
+final class PageUndoCoordinator: ObservableObject {
+    @Published var showingUndo = false
+    @Published var deletedBlocks: [Block] = []
+    @Published var deletedIndices: IndexSet = []
+    
+    private var pageBinding: Binding<Page>
+    private let undoManager: UndoManager
+    
+    init(page: Binding<Page>, undoManager: UndoManager) {
+        self.pageBinding = page
+        self.undoManager = undoManager
+    }
+    
+    func delete(at offsets: IndexSet) {
+        deletedBlocks = offsets.map { pageBinding.wrappedValue.blocks[$0] }
+        deletedIndices = offsets
+        
+        undoManager.registerUndo(withTarget: self) { coordinator in
+            coordinator.performUndo()
+        }
+        
+        withAnimation {
+            pageBinding.wrappedValue.blocks.remove(atOffsets: offsets)
+            showingUndo = true
+        }
+        
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
+            withAnimation {
+                self.showingUndo = false
+            }
+        }
+    }
+    
+    private func performUndo() {
+        withAnimation {
+            for (block, index) in zip(deletedBlocks, deletedIndices) {
+                pageBinding.wrappedValue.blocks.insert(block, at: index)
+            }
+            showingUndo = false
+        }
+    }
+}
+
+// MARK: - Main View
 struct PageView: View {
     @Binding var page: Page
     @ObservedObject var appData: AppData
+    
+    @StateObject private var undoCoordinator: PageUndoCoordinator
+    
+    // Initialize coordinator
+    init(page: Binding<Page>, appData: AppData) {
+        self._page = page
+        self.appData = appData
+        let coordinator = PageUndoCoordinator(page: page, undoManager: appData.undoManager)
+        self._undoCoordinator = StateObject(wrappedValue: coordinator)
+    }
     
     @State private var selectedBlockType: BlockType = .text
     @State private var newContent: String = ""
@@ -12,11 +68,6 @@ struct PageView: View {
     @State private var selectedDate: Date?
     @State private var eventText: String = ""
     @State private var editingBlockID: UUID?
-    
-    // Undo state
-    @State private var showingUndo = false
-    @State private var deletedBlocks: [Block] = []
-    @State private var deletedIndices: IndexSet = []
 
     var body: some View {
         VStack {
@@ -39,7 +90,7 @@ struct PageView: View {
                         .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
                 }
                 .onDelete { indices in
-                    deleteBlocks(at: indices)
+                    undoCoordinator.delete(at: indices)
                 }
                 .onMove { indices, newOffset in
                     page.blocks.move(fromOffsets: indices, toOffset: newOffset)
@@ -73,7 +124,7 @@ struct PageView: View {
             Spacer()
 
             // Undo Snackbar
-            if showingUndo {
+            if undoCoordinator.showingUndo {
                 undoSnackbar()
                     .transition(.move(edge: .bottom).combined(with: .opacity))
                     .zIndex(1)
@@ -127,7 +178,6 @@ struct PageView: View {
     // MARK: - Calendar Block
     private func calendarBlockView(block: Binding<Block>) -> some View {
         VStack(alignment: .leading, spacing: 12) {
-            // Month Navigation
             HStack {
                 Button("<") {
                     currentMonth = Calendar.current.date(byAdding: .month, value: -1, to: currentMonth)!
@@ -144,7 +194,6 @@ struct PageView: View {
             }
             .padding(.horizontal)
 
-            // Days Grid
             let days = generateDaysInMonth(for: currentMonth)
             LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 7), spacing: 8) {
                 ForEach(["S", "M", "T", "W", "T", "F", "S"], id: \.self) { day in
@@ -178,7 +227,6 @@ struct PageView: View {
             }
             .padding(.horizontal)
 
-            // Event List
             if !block.wrappedValue.events.isEmpty {
                 Divider()
                 Text("Events")
@@ -206,51 +254,23 @@ struct PageView: View {
 
     // MARK: - Add Block
     private func addBlock() {
-        guard !newContent.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || selectedBlockType == .calendar else { return }
+        let trimmed = newContent.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty || selectedBlockType == .calendar else { return }
+        
         var newBlock = Block(id: UUID(), type: selectedBlockType)
         if selectedBlockType != .calendar {
-            newBlock.content = newContent
+            newBlock.content = trimmed
         }
         page.blocks.append(newBlock)
         newContent = ""
-    }
-
-    // MARK: - Delete with Undo
-    private func deleteBlocks(at offsets: IndexSet) {
-        deletedBlocks = offsets.map { page.blocks[$0] }
-        deletedIndices = offsets
-
-        // Register undo
-        appData.undoManager.registerUndo(withTarget: self) { target in
-            target.undoDelete()
-        }
-
-        // Perform delete
-        withAnimation(.easeInOut) {
-            page.blocks.remove(atOffsets: offsets)
-            showingUndo = true
-        }
-
-        // Auto-hide
-        DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
-            withAnimation {
-                self.showingUndo = false
-            }
-        }
-    }
-
-    private func undoDelete() {
-        withAnimation(.easeInOut) {
-            page.blocks.insert(contentsOf: deletedBlocks, atOffsets: deletedIndices)
-            showingUndo = false
-        }
     }
 
     // MARK: - Undo Snackbar
     @ViewBuilder
     private func undoSnackbar() -> some View {
         HStack {
-            Text("\(deletedBlocks.count == 1 ? "Block" : "\(deletedBlocks.count) blocks") deleted")
+            let count = undoCoordinator.deletedBlocks.count
+            Text("\(count == 1 ? "Block" : "\(count) blocks") deleted")
                 .font(.subheadline)
             Spacer()
             Button("Undo") {
@@ -282,10 +302,12 @@ struct PageView: View {
               let date = selectedDate else { return }
 
         let key = date.startOfDay
-        if text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        
+        if trimmed.isEmpty {
             appData.pages[pageIndex].blocks[blockIndex].events.removeValue(forKey: key)
         } else {
-            appData.pages[pageIndex].blocks[blockIndex].events[key] = text
+            appData.pages[pageIndex].blocks[blockIndex].events[key] = trimmed
         }
     }
 
@@ -348,7 +370,7 @@ struct EventEditSheet: View {
     }
 }
 
-// MARK: - Shake Gesture (iOS 17+)
+// MARK: - Shake Gesture
 extension View {
     func onShake(_ action: @escaping () -> Void) -> some View {
         self
