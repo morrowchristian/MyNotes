@@ -12,7 +12,7 @@ struct PageView: View {
     @State private var selectedDate: Date?
     @State private var eventText: String = ""
     @State private var editingBlockID: UUID?
-    
+
     var body: some View {
         VStack {
             VStack(alignment: .leading) {
@@ -23,17 +23,20 @@ struct PageView: View {
                     .foregroundStyle(.secondary)
             }
             .padding(.bottom)
-            
-            List($page.blocks) { $block in
-                blockView(for: $block)
+
+            // Fixed: Use ForEach with indices + .onDelete on List
+            List {
+                ForEach(page.blocks.indices, id: \.self) { index in
+                    blockView(for: index)
+                }
+                .onDelete { indices in
+                    page.blocks.remove(atOffsets: indices)
+                }
+                .onMove { indices, newOffset in
+                    page.blocks.move(fromOffsets: indices, toOffset: newOffset)
+                }
             }
-            .onDelete { indices in
-                page.blocks.remove(atOffsets: indices)
-            }
-            .onMove { indices, newOffset in
-                page.blocks.move(fromOffsets: indices, toOffset: newOffset)
-            }
-            
+
             HStack {
                 Picker("Add Layout", selection: $selectedBlockType) {
                     ForEach(BlockType.allCases, id: \.self) { type in
@@ -41,11 +44,11 @@ struct PageView: View {
                     }
                 }
                 .pickerStyle(.menu)
-                
+
                 if selectedBlockType != .calendar {
                     TextField("Content...", text: $newContent)
                 }
-                
+
                 Button("Add") {
                     addBlock()
                 }
@@ -73,9 +76,10 @@ struct PageView: View {
             )
         }
     }
-    
+
     @ViewBuilder
-    private func blockView(for block: Binding<Block>) -> some View {
+    private func blockView(for index: Int) -> some View {
+        let block = $page.blocks[index]
         switch block.wrappedValue.type {
         case .text:
             TextEditor(text: block.content)
@@ -84,15 +88,19 @@ struct PageView: View {
                 .cornerRadius(8)
         case .todo:
             HStack {
-                Toggle("", isOn: block.isCompleted)
-                    .toggleStyle(.checkbox)
+                // Fixed: Use iOS-compatible checkbox
+                Image(systemName: block.wrappedValue.isCompleted ? "checkmark.square.fill" : "square")
+                    .foregroundColor(.blue)
+                    .onTapGesture {
+                        page.blocks[index].isCompleted.toggle()
+                    }
                 TextField("Task", text: block.content)
             }
         case .calendar:
             calendarBlockView(block: block)
         }
     }
-    
+
     private func calendarBlockView(block: Binding<Block>) -> some View {
         VStack(alignment: .leading) {
             HStack {
@@ -108,7 +116,7 @@ struct PageView: View {
                 }
             }
             .padding(.horizontal)
-            
+
             let days = generateDaysInMonth(for: currentMonth)
             LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 7), spacing: 8) {
                 ForEach(["S", "M", "T", "W", "T", "F", "S"], id: \.self) { day in
@@ -143,8 +151,7 @@ struct PageView: View {
                 }
             }
             .padding(.horizontal)
-            
-            // New: Full event list below grid for "full calendar" feel
+
             if !block.wrappedValue.events.isEmpty {
                 Divider()
                 Text("Events")
@@ -168,7 +175,7 @@ struct PageView: View {
         .background(Color(.systemGray6))
         .cornerRadius(12)
     }
-    
+
     private func addBlock() {
         var newBlock = Block(id: UUID(), type: selectedBlockType)
         if selectedBlockType != .calendar {
@@ -177,33 +184,33 @@ struct PageView: View {
         page.blocks.append(newBlock)
         newContent = ""
     }
-    
+
     private func openEventEditor(for date: Date, in block: Block) {
         selectedDate = date
         eventText = block.events[date.startOfDay] ?? ""
         editingBlockID = block.id
         showingEventSheet = true
     }
-    
+
     private func generateDaysInMonth(for date: Date) -> [Date?] {
         guard
             let monthInterval = Calendar.current.dateInterval(of: .month, for: date),
             let daysInMonth = Calendar.current.range(of: .day, in: .month, for: date)?.count
         else { return [] }
-        
+
         let firstDay = monthInterval.start
         let weekday = Calendar.current.component(.weekday, from: firstDay) - 1
         var days: [Date?] = Array(repeating: nil, count: weekday)
-        
+
         for day in 1...daysInMonth {
             if let dayDate = Calendar.current.date(byAdding: .day, value: day - 1, to: firstDay) {
                 days.append(dayDate)
             }
         }
-        
+
         return days
     }
-    
+
     private func isToday(_ date: Date) -> Bool {
         Calendar.current.isDateInToday(date)
     }
