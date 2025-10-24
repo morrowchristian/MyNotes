@@ -19,31 +19,6 @@ struct MainView: View {
     }
 }
 
-struct SidebarView: View {
-    @ObservedObject var appData: AppData
-    
-    var body: some View {
-        List {
-            Section(header: Text("Pages")) {
-                ForEach(appData.pages, id: \.id) { page in
-                    NavigationLink(destination: PageView(page: page, appData: appData)) {
-                        Text(page.title)
-                    }
-                }
-            }
-            NavigationLink(destination: CalendarView(appData: appData)) {
-                Text("Calendar")
-            }
-            Button("Add Page") {
-                let newPage = Page(id: <#UUID#>, title: "New Page")
-                appData.pages.append(newPage)
-                appData.saveData()
-            }
-        }
-        .navigationTitle("Workspace")
-    }
-}
-
 #Preview {
     MainView()
 }
