@@ -15,8 +15,14 @@ struct CalendarView: View {
     }
     
     var body: some View {
-        List(events) { event in
-            Text(event.content)
+        List(events.sorted(by: { ($0.date ?? .distantFuture) < ($1.date ?? .distantFuture) })) { event in
+            HStack {
+                if let date = event.date {
+                    Text(date.formatted(date: .abbreviated, time: .omitted))
+                        .foregroundStyle(.secondary)
+                }
+                Text(event.content)
+            }
         }
         .navigationTitle("Calendar")
     }
