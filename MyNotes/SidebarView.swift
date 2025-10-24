@@ -1,14 +1,12 @@
-//
 //  SidebarView.swift
-//  MyNotes
-//
-//  Created by Christian Morrow on 10/23/25.
-//
-
 import SwiftUI
+import Foundation
 
 struct SidebarView: View {
     @ObservedObject var appData: AppData
+    
+    @State private var showingTemplatePicker = false
+    @State private var chosenTemplate: Template = .blank
     
     var body: some View {
         List {
@@ -23,13 +21,33 @@ struct SidebarView: View {
                 }
             }
             
-            NavigationLink(destination: CalendarView(appData: appData)) {
-                Text("Calendar")
-            }
-            
             Button("Add Page") {
-                let newPage = Page(id: UUID(), title: "New Page")
-                appData.pages.append(newPage)
+                showingTemplatePicker = true
+            }
+            .sheet(isPresented: $showingTemplatePicker) {
+                VStack(spacing: 20) {
+                    Text("Choose a template")
+                        .font(.title2)
+                    
+                    Picker("Template", selection: $chosenTemplate) {
+                        ForEach(Template.allCases) { tmpl in
+                            Text(tmpl.rawValue).tag(tmpl)
+                        }
+                    }
+                    .pickerStyle(.inline)
+                    
+                    Button("Create") {
+                        let newPage = Page(
+                            id: UUID(),
+                            title: "New Page",
+                            markdown: chosenTemplate.markdown
+                        )
+                        appData.pages.append(newPage)
+                        showingTemplatePicker = false
+                    }
+                    .buttonStyle(.borderedProminent)
+                }
+                .padding()
             }
         }
         .navigationTitle("Workspace")

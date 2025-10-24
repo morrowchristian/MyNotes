@@ -8,24 +8,10 @@
 import Foundation
 import Combine
 
-enum BlockType: String, Codable, CaseIterable {
-    case text
-    case todo
-    case calendarEvent
-}
-
-struct Block: Identifiable, Codable {
-    let id: UUID
-    var type: BlockType
-    var content: String
-    var isCompleted: Bool = false
-    var date: Date? = nil // For calendar events
-}
-
 struct Page: Identifiable, Codable {
     let id: UUID
     var title: String
-    var blocks: [Block] = []
+    var markdown: String = ""          // ← NEW
 }
 
 class AppData: ObservableObject {
@@ -33,9 +19,7 @@ class AppData: ObservableObject {
         didSet { saveData() }
     }
     
-    init() {
-        loadData()
-    }
+    init() { loadData() }
     
     func saveData() {
         guard let encoded = try? JSONEncoder().encode(pages) else { return }
