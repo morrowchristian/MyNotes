@@ -12,71 +12,92 @@ struct PageView: View {
     @State private var selectedDate: Date?
     @State private var eventText: String = ""
     @State private var editingBlockID: UUID?
+    
+    // Undo state
+    @State private var showingUndo = false
+    @State private var deletedBlocks: [Block] = []
+    @State private var deletedIndices: IndexSet = []
 
     var body: some View {
         VStack {
-            VStack(alignment: .leading) {
+            // Title + Created At
+            VStack(alignment: .leading, spacing: 4) {
                 TextField("Title", text: $page.title)
                     .font(.largeTitle)
+                    .bold()
                 Text("Created: \(AppData.formatTimestamp(page.createdAt))")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
             }
-            .padding(.bottom)
+            .padding(.horizontal)
+            .padding(.top, 8)
 
-            // Fixed: Use ForEach with indices + .onDelete on List
+            // Block List
             List {
                 ForEach(page.blocks.indices, id: \.self) { index in
                     blockView(for: index)
+                        .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
                 }
                 .onDelete { indices in
-                    page.blocks.remove(atOffsets: indices)
+                    deleteBlocks(at: indices)
                 }
                 .onMove { indices, newOffset in
                     page.blocks.move(fromOffsets: indices, toOffset: newOffset)
                 }
             }
+            .listStyle(PlainListStyle())
 
+            // Add Block Bar
             HStack {
                 Picker("Add Layout", selection: $selectedBlockType) {
                     ForEach(BlockType.allCases, id: \.self) { type in
-                        Text(type.rawValue.capitalized).tag(type)
+                        Label(type.rawValue.capitalized, systemImage: icon(for: type))
+                            .tag(type)
                     }
                 }
                 .pickerStyle(.menu)
 
                 if selectedBlockType != .calendar {
                     TextField("Content...", text: $newContent)
+                        .textFieldStyle(.roundedBorder)
                 }
 
                 Button("Add") {
                     addBlock()
                 }
+                .buttonStyle(.borderedProminent)
             }
             .padding()
             .background(Color(.systemBackground))
+
+            Spacer()
+
+            // Undo Snackbar
+            if showingUndo {
+                undoSnackbar()
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                    .zIndex(1)
+            }
         }
         .navigationTitle(page.title)
+        .navigationBarTitleDisplayMode(.inline)
         .sheet(isPresented: $showingEventSheet) {
             EventEditSheet(
                 date: selectedDate ?? Date(),
                 text: $eventText,
                 onSave: { text in
-                    guard let blockID = editingBlockID,
-                          let pageIndex = appData.pages.firstIndex(where: { $0.id == page.id }),
-                          let blockIndex = appData.pages[pageIndex].blocks.firstIndex(where: { $0.id == blockID }) else { return }
-                    
-                    let dateKey = selectedDate?.startOfDay ?? Date().startOfDay
-                    if text.isEmpty {
-                        appData.pages[pageIndex].blocks[blockIndex].events.removeValue(forKey: dateKey)
-                    } else {
-                        appData.pages[pageIndex].blocks[blockIndex].events[dateKey] = text
-                    }
+                    saveEvent(text: text)
                 }
             )
         }
+        .onShake {
+            if appData.undoManager.canUndo {
+                appData.undoManager.undo()
+            }
+        }
     }
 
+    // MARK: - Block View
     @ViewBuilder
     private func blockView(for index: Int) -> some View {
         let block = $page.blocks[index]
@@ -85,28 +106,33 @@ struct PageView: View {
             TextEditor(text: block.content)
                 .frame(minHeight: 100)
                 .background(Color(.systemGray6))
-                .cornerRadius(8)
+                .cornerRadius(12)
+                .padding(4)
         case .todo:
             HStack {
-                // Fixed: Use iOS-compatible checkbox
                 Image(systemName: block.wrappedValue.isCompleted ? "checkmark.square.fill" : "square")
                     .foregroundColor(.blue)
+                    .font(.title2)
                     .onTapGesture {
                         page.blocks[index].isCompleted.toggle()
                     }
                 TextField("Task", text: block.content)
+                    .strikethrough(block.wrappedValue.isCompleted)
             }
         case .calendar:
             calendarBlockView(block: block)
         }
     }
 
+    // MARK: - Calendar Block
     private func calendarBlockView(block: Binding<Block>) -> some View {
-        VStack(alignment: .leading) {
+        VStack(alignment: .leading, spacing: 12) {
+            // Month Navigation
             HStack {
                 Button("<") {
                     currentMonth = Calendar.current.date(byAdding: .month, value: -1, to: currentMonth)!
                 }
+                .font(.title2)
                 Spacer()
                 Text(currentMonth, format: .dateTime.year().month())
                     .font(.headline)
@@ -114,9 +140,11 @@ struct PageView: View {
                 Button(">") {
                     currentMonth = Calendar.current.date(byAdding: .month, value: 1, to: currentMonth)!
                 }
+                .font(.title2)
             }
             .padding(.horizontal)
 
+            // Days Grid
             let days = generateDaysInMonth(for: currentMonth)
             LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 7), spacing: 8) {
                 ForEach(["S", "M", "T", "W", "T", "F", "S"], id: \.self) { day in
@@ -134,9 +162,7 @@ struct PageView: View {
                                 Text("\(Calendar.current.component(.day, from: date))")
                                     .font(.system(size: 14))
                                 if hasEvent {
-                                    Circle()
-                                        .fill(Color.blue)
-                                        .frame(width: 6, height: 6)
+                                    Circle().fill(Color.blue).frame(width: 6, height: 6)
                                 }
                             }
                             .frame(maxWidth: .infinity, minHeight: 40)
@@ -152,6 +178,7 @@ struct PageView: View {
             }
             .padding(.horizontal)
 
+            // Event List
             if !block.wrappedValue.events.isEmpty {
                 Divider()
                 Text("Events")
@@ -166,6 +193,7 @@ struct PageView: View {
                         Button("Edit") {
                             openEventEditor(for: date, in: block.wrappedValue)
                         }
+                        .font(.caption)
                         .buttonStyle(.borderless)
                     }
                 }
@@ -173,10 +201,12 @@ struct PageView: View {
         }
         .padding()
         .background(Color(.systemGray6))
-        .cornerRadius(12)
+        .cornerRadius(16)
     }
 
+    // MARK: - Add Block
     private func addBlock() {
+        guard !newContent.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || selectedBlockType == .calendar else { return }
         var newBlock = Block(id: UUID(), type: selectedBlockType)
         if selectedBlockType != .calendar {
             newBlock.content = newContent
@@ -185,6 +215,59 @@ struct PageView: View {
         newContent = ""
     }
 
+    // MARK: - Delete with Undo
+    private func deleteBlocks(at offsets: IndexSet) {
+        deletedBlocks = offsets.map { page.blocks[$0] }
+        deletedIndices = offsets
+
+        // Register undo
+        appData.undoManager.registerUndo(withTarget: self) { target in
+            target.undoDelete()
+        }
+
+        // Perform delete
+        withAnimation(.easeInOut) {
+            page.blocks.remove(atOffsets: offsets)
+            showingUndo = true
+        }
+
+        // Auto-hide
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
+            withAnimation {
+                self.showingUndo = false
+            }
+        }
+    }
+
+    private func undoDelete() {
+        withAnimation(.easeInOut) {
+            page.blocks.insert(contentsOf: deletedBlocks, atOffsets: deletedIndices)
+            showingUndo = false
+        }
+    }
+
+    // MARK: - Undo Snackbar
+    @ViewBuilder
+    private func undoSnackbar() -> some View {
+        HStack {
+            Text("\(deletedBlocks.count == 1 ? "Block" : "\(deletedBlocks.count) blocks") deleted")
+                .font(.subheadline)
+            Spacer()
+            Button("Undo") {
+                appData.undoManager.undo()
+            }
+            .font(.subheadline).bold()
+            .foregroundColor(.blue)
+        }
+        .padding()
+        .background(Color(.systemGray6))
+        .cornerRadius(12)
+        .shadow(radius: 8)
+        .padding(.horizontal)
+        .padding(.bottom, 20)
+    }
+
+    // MARK: - Calendar Helpers
     private func openEventEditor(for date: Date, in block: Block) {
         selectedDate = date
         eventText = block.events[date.startOfDay] ?? ""
@@ -192,27 +275,45 @@ struct PageView: View {
         showingEventSheet = true
     }
 
+    private func saveEvent(text: String) {
+        guard let blockID = editingBlockID,
+              let pageIndex = appData.pages.firstIndex(where: { $0.id == page.id }),
+              let blockIndex = appData.pages[pageIndex].blocks.firstIndex(where: { $0.id == blockID }),
+              let date = selectedDate else { return }
+
+        let key = date.startOfDay
+        if text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            appData.pages[pageIndex].blocks[blockIndex].events.removeValue(forKey: key)
+        } else {
+            appData.pages[pageIndex].blocks[blockIndex].events[key] = text
+        }
+    }
+
     private func generateDaysInMonth(for date: Date) -> [Date?] {
-        guard
-            let monthInterval = Calendar.current.dateInterval(of: .month, for: date),
-            let daysInMonth = Calendar.current.range(of: .day, in: .month, for: date)?.count
-        else { return [] }
-
-        let firstDay = monthInterval.start
+        guard let interval = Calendar.current.dateInterval(of: .month, for: date) else { return [] }
+        let firstDay = interval.start
         let weekday = Calendar.current.component(.weekday, from: firstDay) - 1
-        var days: [Date?] = Array(repeating: nil, count: weekday)
+        let daysInMonth = Calendar.current.range(of: .day, in: .month, for: date)?.count ?? 0
 
+        var days: [Date?] = Array(repeating: nil, count: weekday)
         for day in 1...daysInMonth {
             if let dayDate = Calendar.current.date(byAdding: .day, value: day - 1, to: firstDay) {
                 days.append(dayDate)
             }
         }
-
         return days
     }
 
     private func isToday(_ date: Date) -> Bool {
         Calendar.current.isDateInToday(date)
+    }
+
+    private func icon(for type: BlockType) -> String {
+        switch type {
+        case .text: return "doc.text"
+        case .todo: return "checklist"
+        case .calendar: return "calendar"
+        }
     }
 }
 
@@ -226,8 +327,9 @@ struct EventEditSheet: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section("Event for \(date.formatted(date: .abbreviated, time: .omitted))") {
-                    TextField("Enter event...", text: $text)
+                Section("Event on \(date.formatted(date: .abbreviated, time: .omitted))") {
+                    TextField("Enter event...", text: $text, axis: .vertical)
+                        .lineLimit(3...)
                 }
             }
             .navigationTitle("Edit Event")
@@ -242,6 +344,28 @@ struct EventEditSheet: View {
                     }
                 }
             }
+        }
+    }
+}
+
+// MARK: - Shake Gesture (iOS 17+)
+extension View {
+    func onShake(_ action: @escaping () -> Void) -> some View {
+        self
+            .onReceive(NotificationCenter.default.publisher(for: UIDevice.deviceDidShakeNotification)) { _ in
+                action()
+            }
+    }
+}
+
+extension UIDevice {
+    static let deviceDidShakeNotification = Notification.Name("deviceDidShake")
+}
+
+extension UIWindow {
+    open override func motionEnded(_ motion: UIEvent.EventSubtype, with event: UIEvent?) {
+        if motion == .motionShake {
+            NotificationCenter.default.post(name: UIDevice.deviceDidShakeNotification, object: nil)
         }
     }
 }
