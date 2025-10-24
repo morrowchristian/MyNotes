@@ -12,6 +12,7 @@ struct Block: Identifiable, Codable {
     let id: UUID
     var type: BlockType
     var content: String
+    var isCompleted: Bool = false
 }
 
 enum BlockType: String, Codable {
