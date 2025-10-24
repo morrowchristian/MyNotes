@@ -1,6 +1,6 @@
 //  SidebarView.swift
 import SwiftUI
-import Foundation
+import Foundation  // For Template
 
 struct SidebarView: View {
     @ObservedObject var appData: AppData
@@ -40,7 +40,7 @@ struct SidebarView: View {
                         let newPage = Page(
                             id: UUID(),
                             title: "New Page",
-                            markdown: chosenTemplate.markdown
+                            blocks: chosenTemplate.initialBlocks
                         )
                         appData.pages.append(newPage)
                         showingTemplatePicker = false
