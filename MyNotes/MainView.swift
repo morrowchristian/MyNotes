@@ -20,11 +20,22 @@ struct MainView: View {
 }
 
 struct SidebarView: View {
+    @ObservedObject var appData: AppData
+    
     var body: some View {
         List {
-            Text("Notes")
-            Text("To-Do")
-            Text("Calendar")
+            Section(header: Text("Pages")) {
+                ForEach(appData.pages) { page in
+                    NavigationLink(destination: PageView(page: page, appData: appData)) {
+                        Text(page.title)
+                    }
+                }
+            }
+            Button("Add Page") {
+                let newPage = Page(title: "New Page")
+                appData.pages.append(newPage)
+                appData.saveData()
+            }
         }
         .navigationTitle("Workspace")
     }
