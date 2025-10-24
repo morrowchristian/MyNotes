@@ -12,10 +12,28 @@ struct PageView: View {
     @ObservedObject var appData: AppData
     @State private var newBlockContent = ""
     @State private var newBlockType: BlockType = .text
+    @State private var editedTitle = ""
+    
+    init(page: Page, appData: AppData) {
+        self.page = page
+        self.appData = appData
+        _editedTitle = State(initialValue: page.title)
+    }
     
     var body: some View {
         VStack {
-            Text(page.title).font(.largeTitle)
+            // Editable page title
+            TextField("Title", text: $editedTitle, onCommit: {
+                if let index = appData.pages.firstIndex(where: { $0.id == page.id }) {
+                    appData.pages[index].title = editedTitle
+                    appData.saveData()
+                }
+            })
+            .font(.largeTitle)
+            .multilineTextAlignment(.center)
+            .padding(.bottom)
+            
+            // List of blocks
             List {
                 ForEach(page.blocks) { block in
                     switch block.type {
@@ -40,6 +58,8 @@ struct PageView: View {
                     }
                 }
             }
+            
+            // New block input
             HStack {
                 Picker("Type", selection: $newBlockType) {
                     Text("Text").tag(BlockType.text)
@@ -62,8 +82,8 @@ struct PageView: View {
                         }
                     }
                 }
-            }.padding()
+            }
+            .padding()
         }
     }
 }
-
