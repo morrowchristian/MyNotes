@@ -8,6 +8,8 @@
 import SwiftUI
 
 struct MainView: View {
+    @StateObject private var appData = AppData()
+    
     var body: some View {
         NavigationSplitView {
             SidebarView()
