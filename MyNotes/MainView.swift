@@ -12,7 +12,7 @@ struct MainView: View {
     
     var body: some View {
         NavigationSplitView {
-            SidebarView()
+            SidebarView(appData: appData)
         } detail: {
             Text("Select a page")
         }
@@ -25,14 +25,17 @@ struct SidebarView: View {
     var body: some View {
         List {
             Section(header: Text("Pages")) {
-                ForEach(appData.pages) { page in
+                ForEach(appData.pages, id: \.id) { page in
                     NavigationLink(destination: PageView(page: page, appData: appData)) {
                         Text(page.title)
                     }
                 }
             }
+            NavigationLink(destination: CalendarView(appData: appData)) {
+                Text("Calendar")
+            }
             Button("Add Page") {
-                let newPage = Page(title: "New Page")
+                let newPage = Page(id: <#UUID#>, title: "New Page")
                 appData.pages.append(newPage)
                 appData.saveData()
             }

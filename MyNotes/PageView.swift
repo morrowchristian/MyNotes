@@ -33,7 +33,10 @@ struct PageView: View {
                             }
                         ))
                     case .calendarEvent:
-                        Text("Event: \(block.content)")
+                        HStack {
+                            DatePicker("", selection: .constant(Date()), displayedComponents: .date)
+                            Text(block.content)
+                        }
                     }
                 }
             }
