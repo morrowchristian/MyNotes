@@ -1,19 +1,26 @@
 //  SidebarView.swift
 import SwiftUI
-import Foundation  // For Template
+import Foundation
 
 struct SidebarView: View {
     @ObservedObject var appData: AppData
+    @Binding var selectedPageID: UUID?
     
     @State private var showingTemplatePicker = false
     @State private var chosenTemplate: Template = .blank
+    @State private var newTitle = "New Page"
     
     var body: some View {
-        List {
+        List(selection: $selectedPageID) {
             Section(header: Text("Pages")) {
-                ForEach($appData.pages) { $page in
-                    NavigationLink(destination: PageView(page: $page, appData: appData)) {
-                        Text(page.title)
+                ForEach(appData.pages) { page in
+                    NavigationLink(value: page.id) {
+                        VStack(alignment: .leading) {
+                            Text(page.title)
+                            Text(AppData.formatTimestamp(page.createdAt))
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
                     }
                 }
                 .onDelete { indices in
@@ -26,8 +33,11 @@ struct SidebarView: View {
             }
             .sheet(isPresented: $showingTemplatePicker) {
                 VStack(spacing: 20) {
-                    Text("Choose a template")
+                    Text("Create Page")
                         .font(.title2)
+                    
+                    TextField("Title", text: $newTitle)
+                        .textFieldStyle(.roundedBorder)
                     
                     Picker("Template", selection: $chosenTemplate) {
                         ForEach(Template.allCases) { tmpl in
@@ -37,13 +47,22 @@ struct SidebarView: View {
                     .pickerStyle(.inline)
                     
                     Button("Create") {
+                        var finalTitle = newTitle
+                        let now = Date()
+                        
+                        if appData.pages.contains(where: { $0.title == finalTitle }) {
+                            finalTitle += " - \(AppData.formatTimestamp(now))"
+                        }
                         let newPage = Page(
                             id: UUID(),
-                            title: "New Page",
+                            title: finalTitle,
+                            createdAt: now,
                             blocks: chosenTemplate.initialBlocks
                         )
                         appData.pages.append(newPage)
+                        selectedPageID = newPage.id
                         showingTemplatePicker = false
+                        newTitle = "New Page"
                     }
                     .buttonStyle(.borderedProminent)
                 }

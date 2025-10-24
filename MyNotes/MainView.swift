@@ -1,20 +1,20 @@
-//
 //  MainView.swift
-//  MyNotes
-//
-//  Created by Christian Morrow on 10/23/25.
-//
-
 import SwiftUI
 
 struct MainView: View {
     @StateObject private var appData = AppData()
+    @State private var selectedPageID: UUID?
     
     var body: some View {
         NavigationSplitView {
-            SidebarView(appData: appData)
+            SidebarView(appData: appData, selectedPageID: $selectedPageID)
         } detail: {
-            Text("Select a page")
+            if let id = selectedPageID,
+               let binding = Binding<Page>($appData.pages.first(where: { $0.id == id })) {
+                PageView(page: binding, appData: appData)
+            } else {
+                Text("Select a page")
+            }
         }
     }
 }
