@@ -29,6 +29,8 @@ class AppData: ObservableObject {
         didSet { saveData() }
     }
     
+    let undoManager = UndoManager()
+    
     init() { loadData() }
     
     func saveData() {
