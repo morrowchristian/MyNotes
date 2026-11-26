@@ -353,7 +353,7 @@ struct SidebarView: View {
                 } label: {
                     Image(systemName: "gearshape")
                 }
-                .accessibilityLabel("Appearance settings")
+                .accessibilityLabel("Settings")
             }
         }
         .sheet(isPresented: $showingThemeSettings) {
@@ -512,14 +512,20 @@ struct SidebarView: View {
 }
 
 // MARK: - Theme Settings Sheet
-/// Settings sheet for the app theme: accent color + font style.
-/// Changes apply immediately (the theme is @Published on AppData,
-/// so the UI updates live) and persist to UserDefaults via the
-/// theme's didSet. Reached from the gear button in the sidebar
-/// toolbar.
+/// Settings sheet for the app theme (accent color + font style) and
+/// the iCloud sync status. Theme changes apply immediately (the theme
+/// is @Published on AppData, so the UI updates live) and persist to
+/// UserDefaults via the theme's didSet. Reached from the gear button
+/// in the sidebar toolbar.
 struct ThemeSettingsView: View {
     @ObservedObject var appData: AppData
+    @ObservedObject private var syncManager: CloudKitSyncManager
     @Environment(\.dismiss) var dismiss
+
+    init(appData: AppData) {
+        self.appData = appData
+        self._syncManager = ObservedObject(wrappedValue: appData.syncManager)
+    }
 
     var body: some View {
         NavigationStack {
@@ -563,8 +569,24 @@ struct ThemeSettingsView: View {
                 } footer: {
                     Text("Default: blue accent, System font.")
                 }
+                // iCloud sync (roadmap item 8): status only — the sync
+                // itself runs automatically (on launch, when the app
+                // returns to the foreground, and 2 s after a change).
+                Section {
+                    Text(syncManager.statusText)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                    Button("Sync Now") {
+                        syncManager.syncNow()
+                    }
+                    .disabled(syncManager.isSyncing || !syncManager.isAvailable)
+                } header: {
+                    Text("iCloud Sync")
+                } footer: {
+                    Text("Syncs your pages, folders, and theme across your devices with iCloud. Your notes stay on this device when iCloud is unavailable.")
+                }
             }
-            .navigationTitle("Appearance")
+            .navigationTitle("Settings")
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Done") { dismiss() }
