@@ -250,6 +250,59 @@ extension View {
     }
 }
 
+
+// MARK: - Dark Mode Colors (roadmap item 11)
+// Semantic colors for the dark-mode polish: true black surfaces in
+// dark mode, the exact system colors in light mode, so light mode is
+// untouched. Each color is a dynamic UIColor that resolves per trait
+// collection, so it follows the system appearance live (including a
+// mid-session light/dark switch) with no @Environment plumbing at
+// the call sites.
+extension Color {
+    /// Block/card background: the gray containers around text,
+    /// quote, toggle, link, and image blocks, and the calendar
+    /// block. Light: systemGray6 (unchanged). Dark: true black.
+    static var appCardBackground: Color {
+        Color(UIColor { trait in
+            trait.userInterfaceStyle == .dark ? .black : .systemGray6
+        })
+    }
+
+    /// Elevated card background: a card that sits inside another
+    /// card and must stay visible as a card in dark mode - the event
+    /// preview card inside the (now black) calendar block. Light:
+    /// systemBackground (unchanged). Dark: a near-black lift
+    /// (#242424) so the card reads against the true-black page.
+    /// (If you want it pure black too, change the dark value to
+    /// .black - the card will blend into the calendar block.)
+    static var appElevatedBackground: Color {
+        Color(UIColor { trait in
+            trait.userInterfaceStyle == .dark ? UIColor(white: 0.14, alpha: 1) : .systemBackground
+        })
+    }
+
+    /// Muted/secondary text, slightly brighter in dark mode so it
+    /// stays readable on true black. Light: secondaryLabel (exactly
+    /// .secondary, unchanged). Dark: white at 0.72 - brighter than
+    /// the default secondary label, which is white at 0.6 and reads
+    /// dim on pure black.
+    static var appMutedText: Color {
+        Color(UIColor { trait in
+            trait.userInterfaceStyle == .dark ? UIColor(white: 0.72, alpha: 1) : .secondaryLabel
+        })
+    }
+
+    /// The "today" cell fill in the calendar. Light: blue at 0.2
+    /// (unchanged). Dark: blue at 0.38 - the 0.2 fill is washed out
+    /// on true black. (systemBlue already brightens in dark mode;
+    /// the higher opacity is what makes today unmistakable.)
+    static var appTodayHighlight: Color {
+        Color(UIColor { trait in
+            trait.userInterfaceStyle == .dark ? UIColor.systemBlue.withAlphaComponent(0.38) : UIColor.systemBlue.withAlphaComponent(0.2)
+        })
+    }
+}
+
 class AppData: ObservableObject {
     @Published var pages: [Page] = [] {
         didSet { saveData() }

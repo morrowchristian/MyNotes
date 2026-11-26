@@ -27,7 +27,7 @@ struct MainView: View {
             } else {
                 Text("Select a page")
                     .font(.title2)
-                    .foregroundColor(.secondary)
+                    .foregroundColor(Color.appMutedText)
             }
         }
         // The theme accent drives the app's tint: the sidebar
