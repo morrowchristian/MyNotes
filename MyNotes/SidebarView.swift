@@ -161,6 +161,9 @@ struct SidebarView: View {
     }
 
     @State private var showingTemplatePicker = false
+    // Templates Gallery (roadmap item 15): the browsable gallery of
+    // built-in + custom templates, reached from the sidebar.
+    @State private var showingTemplatesGallery = false
     @State private var chosenTemplate: Template = .blank
     @State private var newTitle = "New Page"
 
@@ -338,6 +341,16 @@ struct SidebarView: View {
                             .buttonStyle(.borderedProminent)
                         }
                         .padding()
+                    }
+
+                    // Templates Gallery (roadmap item 15): browse the
+                    // built-in templates and the user's custom ones;
+                    // tapping a card creates a page from it.
+                    Button("Templates") {
+                        showingTemplatesGallery = true
+                    }
+                    .sheet(isPresented: $showingTemplatesGallery) {
+                        TemplatesGalleryView(appData: appData, selectedPageID: $selectedPageID)
                     }
 
                     Button("New Folder") {

@@ -103,6 +103,10 @@ struct PageView: View {
     @State private var showingImagePicker = false
     @State private var selectedPhoto: PhotosPickerItem?
     @State private var showingLinkPicker = false
+    // Save as Template (roadmap item 15): the name typed in the
+    // save alert, defaulting to the page title when it opens.
+    @State private var showingSaveTemplateAlert = false
+    @State private var templateName = ""
     // The text in the "Add tag..." field.
     @State private var newTagText = ""
     // @ mention state: which text block has an active "@" and the
@@ -219,10 +223,29 @@ struct PageView: View {
                     } label: {
                         Label("Print", systemImage: "printer")
                     }
+                    Divider()
+                    // Save as Template (roadmap item 15): saves a
+                    // copy of this page's blocks as a custom template
+                    // for the Templates Gallery.
+                    Button {
+                        templateName = page.title
+                        showingSaveTemplateAlert = true
+                    } label: {
+                        Label("Save as Template", systemImage: "square.and.arrow.down")
+                    }
                 } label: {
                     Label("Export", systemImage: "square.and.arrow.up")
                 }
             }
+        }
+        .alert("Save as Template", isPresented: $showingSaveTemplateAlert) {
+            TextField("Name", text: $templateName)
+            Button("Save") {
+                saveAsTemplate(named: templateName)
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Save a copy of this page's blocks as a template. Editing the page later won't change the template.")
         }
         .sheet(isPresented: $showingEventSheet) {
             EventEditSheet(
@@ -901,6 +924,30 @@ struct PageView: View {
         case .audio: return "mic"
         case .drawing: return "pencil.and.scribble"
         }
+    }
+
+    // MARK: - Save as Template (roadmap item 15)
+    /// Saves a copy of the current page's blocks as a custom
+    /// template for the Templates Gallery. The blocks are structs,
+    /// so the template is a true copy — editing this page later
+    /// never changes it. A name already in use gets a number
+    /// ("Name 2", "Name 3", ...) so two templates never share a
+    /// name in the gallery.
+    private func saveAsTemplate(named rawName: String) {
+        let base = rawName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !base.isEmpty else { return }
+        var name = base
+        var n = 2
+        while appData.customTemplates.contains(where: { $0.name == name }) {
+            name = "\(base) \(n)"
+            n += 1
+        }
+        appData.customTemplates.append(CustomTemplate(
+            id: UUID(),
+            name: name,
+            createdAt: Date(),
+            blocks: page.blocks
+        ))
     }
 
     // MARK: - Export (roadmap item 10)
