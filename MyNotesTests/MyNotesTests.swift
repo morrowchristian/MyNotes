@@ -2,6 +2,13 @@
 //  MyNotesTests.swift
 //  MyNotesTests
 //
+//  Rewritten 2026-11-26: the model was refactored from markdown-based
+//  to block-based (PRs #3-#9), so the old tests referencing
+//  Page(id:title:markdown:) and Template.*.markdown no longer compile.
+//  These tests cover the current block-based model instead. The old
+//  markdown -> AttributedString test is dropped: the app no longer
+//  stores content as markdown, and it referenced `.fontDescriptor`,
+//  which does not exist on SwiftUI Font.
 
 import XCTest
 @testable import MyNotes
@@ -24,19 +31,22 @@ final class MyNotesTests: XCTestCase {
 
     // MARK: - Persistence
     func testSaveAndLoadPages() {
-        let page = Page(id: UUID(), title: "Test", markdown: "# Hello")
+        let block = Block(id: UUID(), type: .text, content: "# Hello")
+        let page = Page(id: UUID(), title: "Test", createdAt: Date(), blocks: [block])
         appData.pages = [page]
         appData.saveData()
 
         let loaded = AppData()
         XCTAssertEqual(loaded.pages.count, 1)
         XCTAssertEqual(loaded.pages[0].title, "Test")
-        XCTAssertEqual(loaded.pages[0].markdown, "# Hello")
+        XCTAssertEqual(loaded.pages[0].blocks.count, 1)
+        XCTAssertEqual(loaded.pages[0].blocks[0].type, .text)
+        XCTAssertEqual(loaded.pages[0].blocks[0].content, "# Hello")
     }
 
     // MARK: - CRUD
     func testCreateAndDeletePage() {
-        let page = Page(id: UUID(), title: "New", markdown: "")
+        let page = Page(id: UUID(), title: "New", createdAt: Date(), blocks: [])
         appData.pages.append(page)
         XCTAssertEqual(appData.pages.count, 1)
 
@@ -46,24 +56,25 @@ final class MyNotesTests: XCTestCase {
 
     // MARK: - Templates
     func testTemplateBlank() {
-        XCTAssertTrue(Template.blank.markdown.contains("# New Page"))
+        XCTAssertTrue(Template.blank.initialBlocks.isEmpty)
     }
 
     func testTemplateToDo() {
-        XCTAssertTrue(Template.todo.markdown.contains("- [ ] Buy milk"))
+        let blocks = Template.todo.initialBlocks
+        XCTAssertEqual(blocks.count, 2)
+        XCTAssertTrue(blocks.allSatisfy { $0.type == .todo })
+        XCTAssertTrue(blocks.contains { $0.content == "Task 1" })
     }
 
     func testTemplateCalendar() {
-        XCTAssertTrue(Template.calendar.markdown.contains("2025-10-25"))
+        let blocks = Template.calendar.initialBlocks
+        XCTAssertEqual(blocks.count, 1)
+        XCTAssertEqual(blocks[0].type, .calendar)
     }
 
-    // MARK: - Markdown → AttributedString (Pure Logic)
-    func testMarkdownToAttributedString() throws {
-        let markdown = "**Bold** and *italic*"
-        let attributed = try AttributedString(markdown: markdown)
-
-        let boldRange = attributed.range(of: "Bold")
-        XCTAssertNotNil(boldRange)
-        XCTAssertTrue(attributed[boldRange!].font?.fontDescriptor.symbolicTraits.contains(.traitBold) ?? false)
+    func testTemplateNotes() {
+        let blocks = Template.notes.initialBlocks
+        XCTAssertEqual(blocks.count, 2)
+        XCTAssertTrue(blocks.allSatisfy { $0.type == .text })
     }
 }
