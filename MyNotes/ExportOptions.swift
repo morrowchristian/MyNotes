@@ -72,6 +72,10 @@ enum MarkdownExporter {
             return lines.isEmpty ? nil : lines.joined(separator: "\n")
         case .link:
             return block.content.isEmpty ? nil : block.content
+        case .audio:
+            // Audio cannot be embedded in Markdown — a placeholder
+            // line when there is a recording, nothing when empty.
+            return block.audioData == nil ? nil : "[Voice note]"
         }
     }
 }
@@ -215,6 +219,17 @@ struct ExportablePageView: View {
                 .foregroundStyle(.blue)
                 .underline()
                 .frame(maxWidth: .infinity, alignment: .leading)
+        case .audio:
+            // The audio itself is not in the PDF — a placeholder
+            // line, same as Markdown export.
+            HStack(spacing: 8) {
+                Image(systemName: "mic")
+                    .foregroundStyle(.secondary)
+                Text("[Voice note]")
+                    .font(.body)
+                    .foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 }

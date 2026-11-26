@@ -683,8 +683,8 @@ struct ThemeSettingsView: View {
 /// The searchable text of a block: the strings Global Search matches
 /// against. Text, to-do, quote, code, and link blocks contribute
 /// their content; a toggle list contributes its title and its body;
-/// a calendar block contributes its event text. Divider and image
-/// blocks have no text, so they never match.
+/// a calendar block contributes its event text. Divider, image, and
+/// audio blocks have no text, so they never match.
 func blockSearchableText(_ block: Block) -> [String] {
     switch block.type {
     case .text, .todo, .quote, .code, .link:
@@ -693,7 +693,7 @@ func blockSearchableText(_ block: Block) -> [String] {
         return [block.content, block.detail]
     case .calendar:
         return block.events.values.map { $0.text }
-    case .divider, .image:
+    case .divider, .image, .audio:
         return []
     }
 }
