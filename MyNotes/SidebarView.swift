@@ -144,13 +144,18 @@ final class SidebarUndoCoordinator: ObservableObject {
 struct SidebarView: View {
     @ObservedObject var appData: AppData
     @Binding var selectedPageID: UUID?
+    // Global Search (roadmap item 9): the query typed in the search
+    // field. Owned by MainView so the detail pane sees it too (for
+    // block highlighting); the sidebar only reads/writes it here.
+    @Binding var searchText: String
 
     @StateObject private var undoCoordinator: SidebarUndoCoordinator
 
     // Initialize coordinator
-    init(appData: AppData, selectedPageID: Binding<UUID?>) {
+    init(appData: AppData, selectedPageID: Binding<UUID?>, searchText: Binding<String>) {
         self.appData = appData
         self._selectedPageID = selectedPageID
+        self._searchText = searchText
         let coordinator = SidebarUndoCoordinator(appData: appData, selectedPageID: selectedPageID)
         self._undoCoordinator = StateObject(wrappedValue: coordinator)
     }
@@ -185,21 +190,46 @@ struct SidebarView: View {
         return page.tags.contains(tag)
     }
 
-    /// Ungrouped pages, filtered by the active tag (if any).
+    /// The search query, trimmed. A query of only whitespace counts
+    /// as no search.
+    private var searchQuery: String {
+        searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// Whether a search is active (a non-empty query is typed).
+    private var isSearching: Bool { !searchQuery.isEmpty }
+
+    /// Whether a page matches the active search query. No query means
+    /// every page matches (the search does not hide anything).
+    private func matchesSearch(_ page: Page) -> Bool {
+        pageMatchesSearch(page, query: searchQuery)
+    }
+
+    /// Whether a page is visible in the sidebar: it must pass BOTH
+    /// the tag filter and the search query (when either is active).
+    /// The filter is view-only state — it does not change the data,
+    /// and it does not clear the selection: if the selected page is
+    /// filtered out, it stays selected and the detail pane still
+    /// shows it (same rule as the tag filter).
+    private func matchesVisible(_ page: Page) -> Bool {
+        matchesFilter(page) && matchesSearch(page)
+    }
+
+    /// Ungrouped pages, filtered by the active tag and search query.
     private var visibleUngroupedPages: [Page] {
-        ungroupedPages.filter(matchesFilter)
+        ungroupedPages.filter(matchesVisible)
     }
 
-    /// A folder's pages, filtered by the active tag (if any).
+    /// A folder's pages, filtered by the active tag and search query.
     private func visibleFolderPages(_ folder: Folder) -> [Page] {
-        folderPages(folder).filter(matchesFilter)
+        folderPages(folder).filter(matchesVisible)
     }
 
-    /// Folders to show. With no filter, every folder (even an empty
-    /// one, as before). With a filter, only folders that contain at
-    /// least one matching page.
+    /// Folders to show. With no filter and no search, every folder
+    /// (even an empty one, as before). With a filter or a search,
+    /// only folders that contain at least one matching page.
     private var visibleFolders: [Folder] {
-        guard selectedTag != nil else { return appData.folders }
+        guard selectedTag != nil || isSearching else { return appData.folders }
         return appData.folders.filter { !visibleFolderPages($0).isEmpty }
     }
 
@@ -230,11 +260,17 @@ struct SidebarView: View {
     var body: some View {
         ZStack(alignment: .bottom) {
             VStack(spacing: 0) {
+                searchField
                 if !allTags.isEmpty {
                     tagFilterRow
-                    Divider()
                 }
+                Divider()
                 List(selection: $selectedPageID) {
+                    if isSearching && visibleUngroupedPages.isEmpty && visibleFolders.isEmpty {
+                        Text("No pages match \"\(searchQuery)\"")
+                            .foregroundStyle(.secondary)
+                    }
+
                     if !visibleUngroupedPages.isEmpty {
                         Section(header: Text("Pages")) {
                             ForEach(visibleUngroupedPages) { page in
@@ -361,6 +397,42 @@ struct SidebarView: View {
         }
     }
 
+    // MARK: - Search
+    /// The Global Search field, always visible at the top of the
+    /// sidebar (above the tag filter row) — it is the primary way to
+    /// find a page, so it is not conditional on tags existing (the
+    /// tag row only appears when tags are in use). A magnifier icon,
+    /// a plain text field, and a clear button while text is typed.
+    /// Autocorrection and auto-capitalization are off so the query
+    /// is searched exactly as typed. Clearing the field (× or
+    /// emptying it) restores the full list.
+    private var searchField: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "magnifyingglass")
+                .foregroundStyle(.secondary)
+            TextField("Search pages", text: $searchText)
+                .textFieldStyle(.plain)
+                .autocorrectionDisabled()
+                .textInputAutocapitalization(.never)
+            if !searchText.isEmpty {
+                Button {
+                    searchText = ""
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Clear search")
+            }
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .background(Color(.systemGray5))
+        .cornerRadius(10)
+        .padding(.horizontal)
+        .padding(.vertical, 8)
+    }
+
     // MARK: - Tag Filter
     /// A horizontally scrollable row of tag chips ("All" + one per
     /// tag in use) at the top of the sidebar. Tapping a tag filters
@@ -414,11 +486,14 @@ struct SidebarView: View {
     // MARK: - Rows
 
     /// A page row: tap to select it, swipe to delete it, long-press for
-    /// the Move to Folder menu.
+    /// the Move to Folder menu. While searching, the part of the title
+    /// matching the query is highlighted (yellow background); a page
+    /// that matches only through a block's content shows its plain
+    /// title, since the title itself does not contain the query.
     private func pageRow(_ page: Page) -> some View {
         NavigationLink(value: page.id) {
             VStack(alignment: .leading) {
-                Text(page.title)
+                highlightedText(page.title, query: searchQuery)
                     .themeFont(.body, theme: appData.theme)
                 Text(AppData.formatTimestamp(page.createdAt))
                     .font(.caption)
@@ -594,4 +669,62 @@ struct ThemeSettingsView: View {
             }
         }
     }
+}
+
+// MARK: - Global Search helpers
+/// The searchable text of a block: the strings Global Search matches
+/// against. Text, to-do, quote, code, and link blocks contribute
+/// their content; a toggle list contributes its title and its body;
+/// a calendar block contributes its event text. Divider and image
+/// blocks have no text, so they never match.
+func blockSearchableText(_ block: Block) -> [String] {
+    switch block.type {
+    case .text, .todo, .quote, .code, .link:
+        return [block.content]
+    case .toggle:
+        return [block.content, block.detail]
+    case .calendar:
+        return block.events.values.map { $0.text }
+    case .divider, .image:
+        return []
+    }
+}
+
+/// Whether a block matches the search query: any of its searchable
+/// strings contains the query as a case-insensitive substring. An
+/// empty query never matches a block, so no block is tinted when the
+/// user is not searching.
+func blockMatchesSearch(_ block: Block, query: String) -> Bool {
+    guard !query.isEmpty else { return false }
+    return blockSearchableText(block).contains { text in
+        text.localizedCaseInsensitiveContains(query)
+    }
+}
+
+/// Whether a page matches the search query: its title contains the
+/// query, or any of its blocks does (case-insensitive substrings).
+/// An empty query matches every page, so no search hides anything.
+func pageMatchesSearch(_ page: Page, query: String) -> Bool {
+    guard !query.isEmpty else { return true }
+    if page.title.localizedCaseInsensitiveContains(query) { return true }
+    return page.blocks.contains { blockMatchesSearch($0, query: query) }
+}
+
+/// A Text with every case-insensitive occurrence of `query` in `text`
+/// given a yellow background. Returns a plain Text when the query is
+/// empty or does not occur, so the caller's font still applies.
+/// (Used for the sidebar page title. The page view tints matching
+/// blocks instead, because a TextEditor cannot show attributed text.)
+func highlightedText(_ text: String, query: String) -> Text {
+    let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !trimmed.isEmpty else { return Text(text) }
+    var attributed = AttributedString(text)
+    var searchStart = attributed.startIndex
+    var found = false
+    while let range = attributed.range(of: trimmed, options: [.caseInsensitive, .diacriticInsensitive], range: searchStart..<attributed.endIndex) {
+        attributed[range].backgroundColor = .yellow.opacity(0.45)
+        searchStart = range.upperBound
+        found = true
+    }
+    return found ? Text(attributed) : Text(text)
 }
