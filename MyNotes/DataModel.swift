@@ -2,6 +2,7 @@
 import Foundation
 import Combine
 import SwiftUI
+import WidgetKit
 
 enum BlockType: String, Codable, CaseIterable {
     case text
@@ -303,6 +304,66 @@ extension Color {
     }
 }
 
+// MARK: - Home Screen Widget (roadmap item 12)
+/// A lightweight summary of one page for the home-screen widget:
+/// id, title, up to two lines of preview text, block count, and
+/// creation date (the widget sorts newest first — Page has no
+/// updated-at date, so creation date is the recency order).
+/// The widget extension defines this same struct (same property
+/// names and types) in its own WidgetData.swift — keep the two in
+/// sync, or the widget fails to decode the summary and shows its
+/// placeholder instead. No image data is ever shared: the summary
+/// is text only, so it stays small.
+struct WidgetPageSummary: Codable, Equatable {
+    var id: UUID
+    var title: String
+    var preview: String
+    var blockCount: Int
+    var createdAt: Date
+
+    /// The readable text of a page as up to two lines, for the
+    /// widget preview. Text-like blocks contribute their content;
+    /// toggle lists contribute the label and the items; calendar
+    /// blocks contribute event text. Divider, image, and link
+    /// blocks carry no readable text.
+    static func preview(for page: Page) -> String {
+        var lines: [String] = []
+        for block in page.blocks {
+            switch block.type {
+            case .text, .todo, .quote, .code:
+                lines.append(contentsOf: block.content.components(separatedBy: .newlines))
+            case .toggle:
+                lines.append(contentsOf: block.content.components(separatedBy: .newlines))
+                lines.append(contentsOf: block.detail.components(separatedBy: .newlines))
+            case .calendar:
+                lines.append(contentsOf: block.events.values.flatMap { $0.text.components(separatedBy: .newlines) })
+            case .divider, .image, .link:
+                break
+            }
+        }
+        let trimmed = lines
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        return Array(trimmed.prefix(2)).joined(separator: "\n")
+    }
+
+    /// Summaries for the widget: the newest pages first, up to 8.
+    static func summaries(for pages: [Page]) -> [WidgetPageSummary] {
+        pages
+            .sorted { $0.createdAt > $1.createdAt }
+            .prefix(8)
+            .map { page in
+                WidgetPageSummary(
+                    id: page.id,
+                    title: page.title,
+                    preview: preview(for: page),
+                    blockCount: page.blocks.count,
+                    createdAt: page.createdAt
+                )
+            }
+    }
+}
+
 class AppData: ObservableObject {
     @Published var pages: [Page] = [] {
         didSet { saveData() }
@@ -324,6 +385,21 @@ class AppData: ObservableObject {
 
     let undoManager = UndoManager()
 
+    /// The App Group shared container the widget reads from, and the
+    /// key the summary is written under. Nil until the App Group
+    /// capability (group.morrowchristian.MyNotes) is enabled on the
+    /// app target in Xcode — the mirror in saveWidgetSummary() is a
+    /// no-op until then, and the local "pages" key stays the source
+    /// of truth, so the app works exactly as before.
+    static let widgetAppGroupID = "group.morrowchristian.MyNotes"
+    static let widgetPagesKey = "widgetPages"
+
+    /// The last summary written to the shared container, so the
+    /// widget timeline is only reloaded when the summary actually
+    /// changed (checking a todo, for example, does not change the
+    /// preview text and needs no reload).
+    private var lastWidgetSummaryData: Data?
+
     init() {
         // syncManager is a let constant with no default value, so
         // it must be assigned before any method on self is called —
@@ -340,6 +416,30 @@ class AppData: ObservableObject {
     func saveData() {
         guard let encoded = try? JSONEncoder().encode(pages) else { return }
         UserDefaults.standard.set(encoded, forKey: "pages")
+        saveWidgetSummary()
+    }
+
+    // MARK: - Home Screen Widget (roadmap item 12)
+    /// Mirrors a lightweight summary of the pages into the shared
+    /// App Group container so the widget extension can read it.
+    /// Called from saveData(), so it runs whenever pages change.
+    /// Safe no-op when the App Group is not configured yet
+    /// (UserDefaults(suiteName:) returns nil) — the app keeps
+    /// working exactly as before.
+    func saveWidgetSummary() {
+        guard let shared = UserDefaults(suiteName: Self.widgetAppGroupID) else { return }
+        let summaries = WidgetPageSummary.summaries(for: pages)
+        guard let encoded = try? JSONEncoder().encode(summaries) else { return }
+        let changed = encoded != lastWidgetSummaryData
+        lastWidgetSummaryData = encoded
+        shared.set(encoded, forKey: Self.widgetPagesKey)
+        // Tell WidgetKit the data changed so the widget refreshes
+        // promptly. The system throttles reloads, so bursts of edits
+        // are coalesced — and an unchanged summary skips the reload
+        // entirely (see `changed` above).
+        if changed {
+            WidgetCenter.shared.reloadAllTimelines()
+        }
     }
     
     func loadData() {

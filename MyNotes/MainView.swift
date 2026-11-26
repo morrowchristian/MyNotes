@@ -34,6 +34,19 @@ struct MainView: View {
         // selection highlight and the prominent/bordered buttons
         // (Add, Create, tag Add) all follow it.
         .tint(appData.theme.accentColor)
+        // Deep link from the home-screen widget (roadmap item 12):
+        // mynotes://page/<id> opens that page. The "mynotes" URL
+        // scheme must be registered on the app target (Info tab >
+        // URL Types) or tapping a widget just opens the app.
+        // Anything else — a bad id, a deleted page — is ignored.
+        .onOpenURL { url in
+            guard url.scheme == "mynotes",
+                  url.host == "page" else { return }
+            let idString = url.path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+            guard let id = UUID(uuidString: idString),
+                  appData.pages.contains(where: { $0.id == id }) else { return }
+            selectedPageID = id
+        }
     }
 }
 
