@@ -12,6 +12,21 @@ enum Template: String, CaseIterable, Identifiable {
 
     var id: Self { self }
 
+    /// A one-line description of what the template contains, for the
+    /// Templates Gallery card. Factual only — what its initial
+    /// blocks are.
+    var galleryDescription: String {
+        switch self {
+        case .blank: return "A blank page to start from."
+        case .notes: return "Two text blocks for quick notes."
+        case .todo: return "Two to-do items to check off."
+        case .calendar: return "A calendar block for events."
+        case .journal: return "A dated text block for today's entry."
+        case .meeting: return "An agenda with two action items."
+        case .project: return "Goals, notes, and a calendar for a project."
+        }
+    }
+
     var initialBlocks: [Block] {
         switch self {
         case .blank:

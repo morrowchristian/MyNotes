@@ -179,6 +179,44 @@ struct Folder: Identifiable, Codable, Equatable {
     var isExpanded: Bool
 }
 
+// MARK: - Custom Templates (roadmap item 15)
+/// A user-saved page template: a name plus a copy of the blocks from
+/// the page it was saved from. The blocks are values (Block is a
+/// struct), so editing the source page afterwards never changes the
+/// template. Persisted under the "customTemplates" UserDefaults key
+/// (a new key — the "pages" key is untouched). NOT synced to iCloud
+/// in v1: the item-8 sync snapshot covers pages + folders + theme
+/// only, so custom templates stay on this device.
+struct CustomTemplate: Identifiable, Codable {
+    let id: UUID
+    var name: String
+    var createdAt: Date
+    var blocks: [Block] = []
+
+    /// Blocks for a new page made from this template: fresh ids for
+    /// every block (so two pages never share a block id) and todos
+    /// unchecked (a template is a fresh start, not a copy of the
+    /// source page's progress). Link targets, event dates, and media
+    /// data (image/audio/drawing) are carried over as saved.
+    func instantiatedBlocks() -> [Block] {
+        blocks.map { block in
+            Block(
+                id: UUID(),
+                type: block.type,
+                content: block.content,
+                isCompleted: false,
+                events: block.events,
+                imageData: block.imageData,
+                isExpanded: block.isExpanded,
+                detail: block.detail,
+                linkedPageID: block.linkedPageID,
+                audioData: block.audioData,
+                drawingData: block.drawingData
+            )
+        }
+    }
+}
+
 // MARK: - App Theme
 /// The accent color of the app, stored by name (e.g. "blue") so it
 /// encodes cleanly to JSON. The six colors are the same palette as
@@ -393,6 +431,13 @@ class AppData: ObservableObject {
         didSet { saveFolders() }
     }
 
+    /// Custom templates (roadmap item 15): user-saved page templates
+    /// for the Templates Gallery. Persisted under the new
+    /// "customTemplates" key; NOT in the iCloud sync snapshot in v1.
+    @Published var customTemplates: [CustomTemplate] = [] {
+        didSet { saveCustomTemplates() }
+    }
+
     @Published var theme: AppTheme = .standard {
         didSet { saveTheme() }
     }
@@ -429,6 +474,7 @@ class AppData: ObservableObject {
         syncManager = CloudKitSyncManager()
         loadData()
         loadFolders()
+        loadCustomTemplates()
         loadTheme()
         syncManager.attach(to: self)
     }
@@ -490,6 +536,21 @@ class AppData: ObservableObject {
             }
         }
         folders = decoded
+    }
+
+    // MARK: - Custom Templates
+    func saveCustomTemplates() {
+        guard let encoded = try? JSONEncoder().encode(customTemplates) else { return }
+        UserDefaults.standard.set(encoded, forKey: "customTemplates")
+    }
+
+    /// Loads the custom templates. Data saved before templates
+    /// existed has no "customTemplates" key, so the list stays
+    /// empty. A corrupt value is ignored the same way.
+    func loadCustomTemplates() {
+        guard let data = UserDefaults.standard.data(forKey: "customTemplates"),
+              let decoded = try? JSONDecoder().decode([CustomTemplate].self, from: data) else { return }
+        customTemplates = decoded
     }
 
     /// The folder holding this page, if any.
