@@ -125,6 +125,26 @@ struct Page: Identifiable, Codable {
     var title: String
     var createdAt: Date
     var blocks: [Block] = []
+    /// Tags for this page (e.g. "work", "personal"), stored without
+    /// the "#" and lowercased. Used to filter the sidebar. Defaults
+    /// to empty, so pages saved before tags existed still decode
+    /// (the synthesized Codable uses decodeIfPresent for defaulted
+    /// fields).
+    var tags: [String] = []
+
+    /// Normalize a typed tag: lowercase, strip a leading "#", trim
+    /// whitespace, and take only the first word (a tag is a single
+    /// word — a space ends it). Returns nil for an empty result.
+    static func normalizedTag(_ raw: String) -> String? {
+        var text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        if text.hasPrefix("#") { text.removeFirst() }
+        text = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let space = text.firstIndex(where: { $0.isWhitespace }) {
+            text = String(text[..<space])
+        }
+        text = text.lowercased()
+        return text.isEmpty ? nil : text
+    }
 }
 
 /// A folder groups pages in the sidebar. A page belongs to at most one
