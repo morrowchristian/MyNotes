@@ -14,6 +14,7 @@ enum BlockType: String, Codable, CaseIterable {
     case image
     case toggle
     case link
+    case audio
 
     /// The label shown for this type in the Add Block picker.
     var displayName: String {
@@ -27,6 +28,7 @@ enum BlockType: String, Codable, CaseIterable {
         case .image: return "Image"
         case .toggle: return "Toggle List"
         case .link: return "Page Link"
+        case .audio: return "Voice Note"
         }
     }
 
@@ -34,7 +36,7 @@ enum BlockType: String, Codable, CaseIterable {
     /// (the Add Block bar hides the content field for these).
     var hidesContentInput: Bool {
         switch self {
-        case .calendar, .divider, .image, .link: return true
+        case .calendar, .divider, .image, .link, .audio: return true
         case .text, .todo, .quote, .code, .toggle: return false
         }
     }
@@ -99,14 +101,21 @@ struct Block: Identifiable, Codable {
     var detail: String = ""
     /// The id of the page a link block points to. Nil for other types.
     var linkedPageID: UUID? = nil
+    /// Recorded audio for voice-note blocks (AAC / .m4a data). Nil
+    /// for other types. Note: the audio rides along in the saved
+    /// page JSON and the iCloud snapshot, so long recordings make
+    /// the dataset bigger — there is no separate audio file store
+    /// in v1.
+    var audioData: Data? = nil
 }
 
 // MARK: - Block decoding (backward compatible)
-// The imageData, isExpanded, detail, and linkedPageID fields were
-// added after the first release, so pages saved by earlier versions
-// do not have those keys. Decode them with decodeIfPresent so old
-// data still loads. (The custom init lives in an extension so the
-// memberwise initializer used by Templates and addBlock() is preserved.)
+// The imageData, isExpanded, detail, linkedPageID, and audioData
+// fields were added after the first release, so pages saved by
+// earlier versions do not have those keys. Decode them with
+// decodeIfPresent so old data still loads. (The custom init lives
+// in an extension so the memberwise initializer used by Templates
+// and addBlock() is preserved.)
 extension Block {
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
@@ -119,6 +128,7 @@ extension Block {
         isExpanded = try container.decodeIfPresent(Bool.self, forKey: .isExpanded) ?? true
         detail = try container.decodeIfPresent(String.self, forKey: .detail) ?? ""
         linkedPageID = try container.decodeIfPresent(UUID.self, forKey: .linkedPageID)
+        audioData = try container.decodeIfPresent(Data.self, forKey: .audioData)
     }
 }
 
@@ -337,7 +347,7 @@ struct WidgetPageSummary: Codable, Equatable {
                 lines.append(contentsOf: block.detail.components(separatedBy: .newlines))
             case .calendar:
                 lines.append(contentsOf: block.events.values.flatMap { $0.text.components(separatedBy: .newlines) })
-            case .divider, .image, .link:
+            case .divider, .image, .link, .audio:
                 break
             }
         }

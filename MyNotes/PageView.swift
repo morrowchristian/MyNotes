@@ -75,6 +75,10 @@ struct PageView: View {
     let searchQuery: String
 
     @StateObject private var undoCoordinator: PageUndoCoordinator
+    // Voice Notes (roadmap item 13): owns the recorder/player for
+    // audio blocks. One coordinator per page — only one block
+    // records or plays at a time.
+    @StateObject private var audioCoordinator = AudioBlockCoordinator()
 
     // Initialize coordinator
     init(page: Binding<Page>, appData: AppData, selectedPageID: Binding<UUID?>, searchQuery: String) {
@@ -234,6 +238,12 @@ struct PageView: View {
             if appData.undoManager.canUndo {
                 appData.undoManager.undo()
             }
+        }
+        .onDisappear {
+            // Stop any recording/playback when leaving the page, so
+            // audio never keeps playing after navigating away. A
+            // recording in progress is saved as a take, not lost.
+            audioCoordinator.stopAll()
         }
         .photosPicker(isPresented: $showingImagePicker, selection: $selectedPhoto, matching: .images)
         .onChange(of: selectedPhoto) { _, newItem in
@@ -430,6 +440,8 @@ struct PageView: View {
             .cornerRadius(12)
         case .link:
             linkBlockView(block: block)
+        case .audio:
+            audioBlockView(block: block)
         }
     }
 
@@ -579,7 +591,7 @@ struct PageView: View {
         }
 
         let trimmed = newContent.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty || selectedBlockType == .calendar || selectedBlockType == .divider else { return }
+        guard !trimmed.isEmpty || selectedBlockType == .calendar || selectedBlockType == .divider || selectedBlockType == .audio else { return }
         
         var newBlock = Block(id: UUID(), type: selectedBlockType)
         if selectedBlockType != .calendar && selectedBlockType != .divider {
@@ -645,6 +657,26 @@ struct PageView: View {
             .background(Color.appCardBackground)
             .cornerRadius(12)
         }
+    }
+
+    // MARK: - Audio Block (roadmap item 13)
+    /// A voice-note block. The finish closure writes the recorded
+    /// AAC data into the block by id (looked up at completion time),
+    /// so a block deleted mid-recording is a no-op instead of a
+    /// crash through a stale binding.
+    @ViewBuilder
+    private func audioBlockView(block: Binding<Block>) -> some View {
+        let blockID = block.wrappedValue.id
+        AudioBlockView(
+            block: block,
+            coordinator: audioCoordinator,
+            accentColor: appData.theme.accentColor,
+            onRecordingFinished: { data in
+                if let index = page.blocks.firstIndex(where: { $0.id == blockID }) {
+                    page.blocks[index].audioData = data
+                }
+            }
+        )
     }
 
     // MARK: - @ Mentions (Page Links)
@@ -844,6 +876,7 @@ struct PageView: View {
         case .image: return "photo"
         case .toggle: return "list.bullet"
         case .link: return "link"
+        case .audio: return "mic"
         }
     }
 
