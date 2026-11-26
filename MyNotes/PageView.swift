@@ -69,14 +69,19 @@ struct PageView: View {
     // The selected page, shared with MainView/SidebarView. A link block
     // sets this to its target page's id to navigate to it.
     @Binding var selectedPageID: UUID?
+    // Global Search (roadmap item 9): the query typed in the sidebar.
+    // Owned by MainView; read-only here. Matching blocks are tinted
+    // so the user can see where the query occurs in this page.
+    let searchQuery: String
 
     @StateObject private var undoCoordinator: PageUndoCoordinator
 
     // Initialize coordinator
-    init(page: Binding<Page>, appData: AppData, selectedPageID: Binding<UUID?>) {
+    init(page: Binding<Page>, appData: AppData, selectedPageID: Binding<UUID?>, searchQuery: String) {
         self._page = page
         self.appData = appData
         self._selectedPageID = selectedPageID
+        self.searchQuery = searchQuery
         let coordinator = PageUndoCoordinator(page: page, undoManager: appData.undoManager)
         self._undoCoordinator = StateObject(wrappedValue: coordinator)
     }
@@ -104,6 +109,13 @@ struct PageView: View {
     // with the active @ mention, the suggestions dismiss.
     @FocusState private var focusedTextBlockID: UUID?
 
+    /// The active Global Search query, trimmed. Empty when the user
+    /// is not searching (a query of only whitespace counts as no
+    /// search). Used to tint matching blocks in the list below.
+    private var activeSearchQuery: String {
+        searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
     var body: some View {
         VStack {
             // Title + Created At
@@ -127,6 +139,18 @@ struct PageView: View {
                 ForEach(page.blocks.indices, id: \.self) { index in
                     blockView(for: index)
                         .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
+                        // Global Search highlight: a block whose text
+                        // matches the query gets a light yellow row
+                        // tint, so the match is visible without
+                        // opening it. TextEditor cannot show attributed
+                        // text, so the match is highlighted at the
+                        // block level (a tint), not inside the editor.
+                        // No query means no tint.
+                        .listRowBackground(
+                            blockMatchesSearch(page.blocks[index], query: activeSearchQuery)
+                                ? Color.yellow.opacity(0.2)
+                                : Color.clear
+                        )
                 }
                 .onDelete { indices in
                     undoCoordinator.delete(at: indices)
