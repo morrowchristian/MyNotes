@@ -109,7 +109,7 @@ struct PageView: View {
             // Title + Created At
             VStack(alignment: .leading, spacing: 4) {
                 TextField("Title", text: $page.title)
-                    .font(.largeTitle)
+                    .themeFont(.largeTitle, theme: appData.theme)
                     .bold()
                 Text("Created: \(AppData.formatTimestamp(page.createdAt))")
                     .font(.subheadline)
@@ -283,6 +283,7 @@ struct PageView: View {
         case .text:
             VStack(alignment: .leading, spacing: 6) {
                 TextEditor(text: block.content)
+                    .themeFont(.body, theme: appData.theme)
                     .frame(minHeight: 100)
                     .background(Color(.systemGray6))
                     .cornerRadius(12)
@@ -300,12 +301,13 @@ struct PageView: View {
         case .todo:
             HStack {
                 Image(systemName: block.wrappedValue.isCompleted ? "checkmark.square.fill" : "square")
-                    .foregroundColor(.blue)
+                    .foregroundColor(appData.theme.accentColor)
                     .font(.title2)
                     .onTapGesture {
                         page.blocks[index].isCompleted.toggle()
                     }
                 TextField("Task", text: block.content)
+                    .themeFont(.body, theme: appData.theme)
                     .strikethrough(block.wrappedValue.isCompleted)
             }
         case .calendar:
@@ -316,6 +318,7 @@ struct PageView: View {
                     .fill(Color.blue)
                     .frame(width: 4)
                 TextEditor(text: block.content)
+                    .themeFont(.body, theme: appData.theme)
                     .italic()
                     .frame(minHeight: 60)
                     .scrollContentBackground(.hidden)
@@ -357,7 +360,7 @@ struct PageView: View {
                         page.blocks[index].isExpanded.toggle()
                     } label: {
                         Image(systemName: block.wrappedValue.isExpanded ? "chevron.down" : "chevron.right")
-                            .foregroundColor(.blue)
+                            .foregroundColor(appData.theme.accentColor)
                             .font(.subheadline)
                             .frame(minWidth: 28, minHeight: 28)
                     }
@@ -565,9 +568,9 @@ struct PageView: View {
             } label: {
                 HStack(spacing: 8) {
                     Image(systemName: "link")
-                        .foregroundStyle(.blue)
+                        .foregroundStyle(appData.theme.accentColor)
                     Text(block.wrappedValue.content.isEmpty ? target.title : block.wrappedValue.content)
-                        .foregroundStyle(.blue)
+                        .foregroundStyle(appData.theme.accentColor)
                         .underline()
                     Spacer()
                     Image(systemName: "chevron.right")
@@ -691,7 +694,7 @@ struct PageView: View {
                 appData.undoManager.undo()
             }
             .font(.subheadline).bold()
-            .foregroundColor(.blue)
+            .foregroundColor(appData.theme.accentColor)
         }
         .padding()
         .background(Color(.systemGray6))
@@ -729,7 +732,8 @@ struct PageView: View {
             eventColor = event.color
         } else {
             eventText = ""
-            eventColor = .blue
+            // A new event defaults to the theme accent color.
+            eventColor = appData.theme.accent.eventColor
         }
         editingBlockID = block.id
         showingEventSheet = true

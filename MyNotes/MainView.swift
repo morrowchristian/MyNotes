@@ -24,6 +24,10 @@ struct MainView: View {
                     .foregroundColor(.secondary)
             }
         }
+        // The theme accent drives the app's tint: the sidebar
+        // selection highlight and the prominent/bordered buttons
+        // (Add, Create, tag Add) all follow it.
+        .tint(appData.theme.accentColor)
     }
 }
 
