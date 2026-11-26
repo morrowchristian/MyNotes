@@ -165,6 +165,41 @@ struct SidebarView: View {
     @State private var folderToRename: Folder? = nil
     @State private var renameText = ""
 
+    // The tag the sidebar list is filtered by (nil = no filter).
+    // View-only state — it does not change the data or the selection.
+    @State private var selectedTag: String? = nil
+
+    /// Every tag in use across pages, sorted alphabetically, deduped.
+    /// The filter chips are derived from the current pages, so a tag
+    /// that no longer exists on any page disappears on its own.
+    private var allTags: [String] {
+        Array(Set(appData.pages.flatMap { $0.tags })).sorted()
+    }
+
+    /// Whether a page passes the active tag filter (nil = no filter).
+    private func matchesFilter(_ page: Page) -> Bool {
+        guard let tag = selectedTag else { return true }
+        return page.tags.contains(tag)
+    }
+
+    /// Ungrouped pages, filtered by the active tag (if any).
+    private var visibleUngroupedPages: [Page] {
+        ungroupedPages.filter(matchesFilter)
+    }
+
+    /// A folder's pages, filtered by the active tag (if any).
+    private func visibleFolderPages(_ folder: Folder) -> [Page] {
+        folderPages(folder).filter(matchesFilter)
+    }
+
+    /// Folders to show. With no filter, every folder (even an empty
+    /// one, as before). With a filter, only folders that contain at
+    /// least one matching page.
+    private var visibleFolders: [Folder] {
+        guard selectedTag != nil else { return appData.folders }
+        return appData.folders.filter { !visibleFolderPages($0).isEmpty }
+    }
+
     /// Pages in no folder, in `appData.pages` order. These show at the
     /// top level of the sidebar.
     private var ungroupedPages: [Page] {
@@ -191,107 +226,113 @@ struct SidebarView: View {
 
     var body: some View {
         ZStack(alignment: .bottom) {
-            List(selection: $selectedPageID) {
-                if !ungroupedPages.isEmpty {
-                    Section(header: Text("Pages")) {
-                        ForEach(ungroupedPages) { page in
-                            pageRow(page)
+            VStack(spacing: 0) {
+                if !allTags.isEmpty {
+                    tagFilterRow
+                    Divider()
+                }
+                List(selection: $selectedPageID) {
+                    if !visibleUngroupedPages.isEmpty {
+                        Section(header: Text("Pages")) {
+                            ForEach(visibleUngroupedPages) { page in
+                                pageRow(page)
+                            }
                         }
                     }
-                }
 
-                if !appData.folders.isEmpty {
-                    Section(header: Text("Folders")) {
-                        ForEach(appData.folders) { folder in
-                            folderRow(folder)
-                            if folder.isExpanded {
-                                ForEach(folderPages(folder)) { page in
-                                    pageRow(page)
-                                        .padding(.leading, 20)
+                    if !visibleFolders.isEmpty {
+                        Section(header: Text("Folders")) {
+                            ForEach(visibleFolders) { folder in
+                                folderRow(folder)
+                                if folder.isExpanded {
+                                    ForEach(visibleFolderPages(folder)) { page in
+                                        pageRow(page)
+                                            .padding(.leading, 20)
+                                    }
                                 }
                             }
                         }
                     }
+
+                    Button("Add Page") {
+                        showingTemplatePicker = true
+                    }
+                    .sheet(isPresented: $showingTemplatePicker) {
+                        VStack(spacing: 20) {
+                            Text("Create Page")
+                                .font(.title2)
+
+                            TextField("Title", text: $newTitle)
+                                .textFieldStyle(.roundedBorder)
+
+                            Picker("Template", selection: $chosenTemplate) {
+                                ForEach(Template.allCases) { tmpl in
+                                    Text(tmpl.rawValue).tag(tmpl)
+                                }
+                            }
+                            .pickerStyle(.inline)
+
+                            Button("Create") {
+                                var finalTitle = newTitle
+                                let now = Date()
+
+                                if appData.pages.contains(where: { $0.title == finalTitle }) {
+                                    finalTitle += " - \(AppData.formatTimestamp(now))"
+                                }
+                                let newPage = Page(
+                                    id: UUID(),
+                                    title: finalTitle,
+                                    createdAt: now,
+                                    blocks: chosenTemplate.initialBlocks
+                                )
+                                appData.pages.append(newPage)
+                                selectedPageID = newPage.id
+                                showingTemplatePicker = false
+                                newTitle = "New Page"
+                            }
+                            .buttonStyle(.borderedProminent)
+                        }
+                        .padding()
+                    }
+
+                    Button("New Folder") {
+                        newFolderName = "New Folder"
+                        showingNewFolderAlert = true
+                    }
                 }
-
-                Button("Add Page") {
-                    showingTemplatePicker = true
+                .alert("New Folder", isPresented: $showingNewFolderAlert) {
+                    TextField("Name", text: $newFolderName)
+                    Button("Create") {
+                        let name = newFolderName.trimmingCharacters(in: .whitespacesAndNewlines)
+                        let folder = Folder(
+                            id: UUID(),
+                            name: name.isEmpty ? "New Folder" : name,
+                            pageIDs: [],
+                            isExpanded: true
+                        )
+                        appData.folders.append(folder)
+                    }
+                    Button("Cancel", role: .cancel) {}
+                } message: {
+                    Text("Enter a name for the new folder.")
                 }
-                .sheet(isPresented: $showingTemplatePicker) {
-                    VStack(spacing: 20) {
-                        Text("Create Page")
-                            .font(.title2)
-
-                        TextField("Title", text: $newTitle)
-                            .textFieldStyle(.roundedBorder)
-
-                        Picker("Template", selection: $chosenTemplate) {
-                            ForEach(Template.allCases) { tmpl in
-                                Text(tmpl.rawValue).tag(tmpl)
+                .alert("Rename Folder", isPresented: $showingRenameAlert) {
+                    TextField("Name", text: $renameText)
+                    Button("Rename") {
+                        if let folder = folderToRename {
+                            let name = renameText.trimmingCharacters(in: .whitespacesAndNewlines)
+                            if !name.isEmpty {
+                                appData.renameFolder(id: folder.id, to: name)
                             }
                         }
-                        .pickerStyle(.inline)
-
-                        Button("Create") {
-                            var finalTitle = newTitle
-                            let now = Date()
-
-                            if appData.pages.contains(where: { $0.title == finalTitle }) {
-                                finalTitle += " - \(AppData.formatTimestamp(now))"
-                            }
-                            let newPage = Page(
-                                id: UUID(),
-                                title: finalTitle,
-                                createdAt: now,
-                                blocks: chosenTemplate.initialBlocks
-                            )
-                            appData.pages.append(newPage)
-                            selectedPageID = newPage.id
-                            showingTemplatePicker = false
-                            newTitle = "New Page"
-                        }
-                        .buttonStyle(.borderedProminent)
+                        folderToRename = nil
                     }
-                    .padding()
-                }
-
-                Button("New Folder") {
-                    newFolderName = "New Folder"
-                    showingNewFolderAlert = true
-                }
-            }
-            .alert("New Folder", isPresented: $showingNewFolderAlert) {
-                TextField("Name", text: $newFolderName)
-                Button("Create") {
-                    let name = newFolderName.trimmingCharacters(in: .whitespacesAndNewlines)
-                    let folder = Folder(
-                        id: UUID(),
-                        name: name.isEmpty ? "New Folder" : name,
-                        pageIDs: [],
-                        isExpanded: true
-                    )
-                    appData.folders.append(folder)
-                }
-                Button("Cancel", role: .cancel) {}
-            } message: {
-                Text("Enter a name for the new folder.")
-            }
-            .alert("Rename Folder", isPresented: $showingRenameAlert) {
-                TextField("Name", text: $renameText)
-                Button("Rename") {
-                    if let folder = folderToRename {
-                        let name = renameText.trimmingCharacters(in: .whitespacesAndNewlines)
-                        if !name.isEmpty {
-                            appData.renameFolder(id: folder.id, to: name)
-                        }
+                    Button("Cancel", role: .cancel) {
+                        folderToRename = nil
                     }
-                    folderToRename = nil
+                } message: {
+                    Text("Enter a new name for the folder.")
                 }
-                Button("Cancel", role: .cancel) {
-                    folderToRename = nil
-                }
-            } message: {
-                Text("Enter a new name for the folder.")
             }
 
             // Undo Snackbar
@@ -302,6 +343,56 @@ struct SidebarView: View {
             }
         }
         .navigationTitle("Workspace")
+    }
+
+    // MARK: - Tag Filter
+    /// A horizontally scrollable row of tag chips ("All" + one per
+    /// tag in use) at the top of the sidebar. Tapping a tag filters
+    /// the page list to pages carrying it; tapping the same tag again
+    /// (or "All") clears the filter. The filter is view-only state —
+    /// it does not change the data, and it does not clear the
+    /// selection: if the selected page is filtered out of the list,
+    /// it stays selected and the detail pane still shows it.
+    private var tagFilterRow: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    tagFilterChip("All", isSelected: selectedTag == nil) {
+                        selectedTag = nil
+                    }
+                    ForEach(allTags, id: \.self) { tag in
+                        tagFilterChip("#\(tag)", isSelected: selectedTag == tag) {
+                            selectedTag = (selectedTag == tag) ? nil : tag
+                        }
+                    }
+                }
+                .padding(.horizontal)
+            }
+            if let tag = selectedTag {
+                HStack(spacing: 8) {
+                    Text("Filtered by #\(tag)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Button("Clear") { selectedTag = nil }
+                        .font(.caption)
+                }
+                .padding(.horizontal)
+            }
+        }
+        .padding(.vertical, 8)
+    }
+
+    private func tagFilterChip(_ label: String, isSelected: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(label)
+                .font(.caption)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
+                .background(isSelected ? Color.blue : Color(.systemGray5))
+                .foregroundStyle(isSelected ? .white : .primary)
+                .cornerRadius(12)
+        }
+        .buttonStyle(.plain)
     }
 
     // MARK: - Rows
@@ -357,7 +448,7 @@ struct SidebarView: View {
                 Text(folder.name)
                     .font(.headline)
                 Spacer()
-                Text("\(folderPages(folder).count)")
+                Text("\(visibleFolderPages(folder).count)")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

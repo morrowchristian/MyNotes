@@ -94,6 +94,8 @@ struct PageView: View {
     @State private var showingImagePicker = false
     @State private var selectedPhoto: PhotosPickerItem?
     @State private var showingLinkPicker = false
+    // The text in the "Add tag..." field.
+    @State private var newTagText = ""
     // @ mention state: which text block has an active "@" and the
     // query typed after it. Nil/empty when no mention is active.
     @State private var mentionBlockID: UUID?
@@ -115,6 +117,10 @@ struct PageView: View {
             }
             .padding(.horizontal)
             .padding(.top, 8)
+
+            // Tags
+            tagEditor
+                .padding(.top, 4)
 
             // Block List
             List {
@@ -210,6 +216,63 @@ struct PageView: View {
                 clearMention()
             }
         }
+    }
+
+    // MARK: - Tag Editor
+    /// The page's tags as chips, plus a compact field to add one.
+    /// Tags are shown with a "#" prefix; the × on a chip removes it.
+    /// Adding normalizes the text (lowercase, no "#", first word
+    /// only) and ignores duplicates and empties. Mutating page.tags
+    /// writes through the page binding to appData.pages, so tags
+    /// persist with the page (same mechanism as the title/blocks).
+    private var tagEditor: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                ForEach(page.tags, id: \.self) { tag in
+                    HStack(spacing: 4) {
+                        Text("#\(tag)")
+                            .font(.caption)
+                        Button {
+                            removeTag(tag)
+                        } label: {
+                            Image(systemName: "xmark")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(Color(.systemGray5))
+                    .cornerRadius(10)
+                }
+                TextField("Add tag...", text: $newTagText)
+                    .font(.caption)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(width: 110)
+                    .onSubmit { addTag() }
+                Button("Add") { addTag() }
+                    .font(.caption)
+                    .buttonStyle(.bordered)
+                    .disabled(newTagText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+            .padding(.horizontal)
+        }
+    }
+
+    private func addTag() {
+        guard let tag = Page.normalizedTag(newTagText) else {
+            newTagText = ""
+            return
+        }
+        if !page.tags.contains(tag) {
+            page.tags.append(tag)
+        }
+        newTagText = ""
+    }
+
+    private func removeTag(_ tag: String) {
+        page.tags.removeAll { $0 == tag }
     }
 
     // MARK: - Block View
