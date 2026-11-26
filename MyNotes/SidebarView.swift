@@ -719,12 +719,17 @@ func highlightedText(_ text: String, query: String) -> Text {
     let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
     guard !trimmed.isEmpty else { return Text(text) }
     var attributed = AttributedString(text)
-    var searchStart = attributed.startIndex
+    var searchStart = text.startIndex
     var found = false
-    while let range = attributed.range(of: trimmed, options: [.caseInsensitive, .diacriticInsensitive], range: searchStart..<attributed.endIndex) {
-        attributed[range].backgroundColor = .yellow.opacity(0.45)
+    // AttributedString has no range(of:options:range:) overload, so
+    // find each match in the plain String (which does) and convert the
+    // String range to an AttributedString range.
+    while let range = text.range(of: trimmed, options: [.caseInsensitive, .diacriticInsensitive], range: searchStart..<text.endIndex) {
+        if let attrRange = Range(range, in: attributed) {
+            attributed[attrRange].backgroundColor = .yellow.opacity(0.45)
+            found = true
+        }
         searchStart = range.upperBound
-        found = true
     }
     return found ? Text(attributed) : Text(text)
 }
