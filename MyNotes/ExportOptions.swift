@@ -10,6 +10,7 @@
 import SwiftUI
 import UIKit
 import CoreGraphics
+import PencilKit
 
 // MARK: - Markdown Export
 
@@ -76,6 +77,11 @@ enum MarkdownExporter {
             // Audio cannot be embedded in Markdown — a placeholder
             // line when there is a recording, nothing when empty.
             return block.audioData == nil ? nil : "[Voice note]"
+        case .drawing:
+            // A drawing cannot be embedded in Markdown — a
+            // placeholder line when there are strokes, nothing when
+            // empty (same rule as the audio block).
+            return block.drawingData == nil ? nil : "[Drawing]"
         }
     }
 }
@@ -230,6 +236,28 @@ struct ExportablePageView: View {
                     .foregroundStyle(.secondary)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
+        case .drawing:
+            // Unlike audio, a drawing CAN be printed: render the
+            // strokes as an image on white (the PDF is forced
+            // light). A corrupt/unreadable value, or an empty
+            // drawing, falls back to the placeholder line.
+            if let image = DrawingBlockImage.image(for: block.drawingData) {
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(maxWidth: .infinity)
+                    .background(Color.white)
+                    .clipShape(RoundedRectangle(cornerRadius: 6))
+            } else {
+                HStack(spacing: 8) {
+                    Image(systemName: "pencil.and.scribble")
+                        .foregroundStyle(.secondary)
+                    Text("[Drawing]")
+                        .font(.body)
+                        .foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
         }
     }
 }
