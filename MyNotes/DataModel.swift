@@ -127,14 +127,31 @@ struct Page: Identifiable, Codable {
     var blocks: [Block] = []
 }
 
+/// A folder groups pages in the sidebar. A page belongs to at most one
+/// folder; a page in no folder is ungrouped and shows at the top level.
+/// `isExpanded` is the sidebar collapse/expand state and persists.
+struct Folder: Identifiable, Codable, Equatable {
+    let id: UUID
+    var name: String
+    var pageIDs: [UUID]
+    var isExpanded: Bool
+}
+
 class AppData: ObservableObject {
     @Published var pages: [Page] = [] {
         didSet { saveData() }
     }
+
+    @Published var folders: [Folder] = [] {
+        didSet { saveFolders() }
+    }
     
     let undoManager = UndoManager()
     
-    init() { loadData() }
+    init() {
+        loadData()
+        loadFolders()
+    }
     
     func saveData() {
         guard let encoded = try? JSONEncoder().encode(pages) else { return }
@@ -145,6 +162,77 @@ class AppData: ObservableObject {
         guard let data = UserDefaults.standard.data(forKey: "pages"),
               let decoded = try? JSONDecoder().decode([Page].self, from: data) else { return }
         pages = decoded
+    }
+
+    // MARK: - Folders
+    func saveFolders() {
+        guard let encoded = try? JSONEncoder().encode(folders) else { return }
+        UserDefaults.standard.set(encoded, forKey: "folders")
+    }
+
+    /// Loads the folders. Data saved before folders existed has no
+    /// "folders" key, so the list stays empty and every page is
+    /// ungrouped. Page ids are deduped across folders (first occurrence
+    /// wins) so a page is never shown in two folders.
+    func loadFolders() {
+        guard let data = UserDefaults.standard.data(forKey: "folders") else { return }
+        guard var decoded = try? JSONDecoder().decode([Folder].self, from: data) else { return }
+        var seen: Set<UUID> = []
+        for i in decoded.indices {
+            decoded[i].pageIDs.removeAll { id in
+                if seen.contains(id) { return true }
+                seen.insert(id)
+                return false
+            }
+        }
+        folders = decoded
+    }
+
+    /// The folder holding this page, if any.
+    func folderContaining(pageID: UUID) -> Folder? {
+        folders.first { $0.pageIDs.contains(pageID) }
+    }
+
+    /// Move a page into a folder, or out to ungrouped when folderID is nil.
+    /// A page belongs to at most one folder. Moving to the folder it is
+    /// already in is a no-op, so its position in that folder is preserved.
+    func movePage(_ pageID: UUID, to folderID: UUID?) {
+        if let folderID, folderContaining(pageID: pageID)?.id == folderID {
+            return
+        }
+        for i in folders.indices {
+            folders[i].pageIDs.removeAll { $0 == pageID }
+        }
+        if let folderID, let index = folders.firstIndex(where: { $0.id == folderID }) {
+            folders[index].pageIDs.append(pageID)
+        }
+    }
+
+    /// Remove a page id from every folder (used when the page is deleted,
+    /// so a folder never references a deleted page).
+    func removePageFromFolders(_ pageID: UUID) {
+        for i in folders.indices {
+            folders[i].pageIDs.removeAll { $0 == pageID }
+        }
+    }
+
+    /// Restore a page to a folder at a position (used by Undo). Does
+    /// nothing if the folder no longer exists — the page stays ungrouped.
+    func insertPage(_ pageID: UUID, intoFolder folderID: UUID, at index: Int) {
+        removePageFromFolders(pageID)
+        guard let folderIndex = folders.firstIndex(where: { $0.id == folderID }) else { return }
+        let clamped = min(max(index, 0), folders[folderIndex].pageIDs.count)
+        folders[folderIndex].pageIDs.insert(pageID, at: clamped)
+    }
+
+    func setFolderExpanded(id: UUID, isExpanded: Bool) {
+        guard let index = folders.firstIndex(where: { $0.id == id }) else { return }
+        folders[index].isExpanded = isExpanded
+    }
+
+    func renameFolder(id: UUID, to name: String) {
+        guard let index = folders.firstIndex(where: { $0.id == id }) else { return }
+        folders[index].name = name
     }
     
     static func formatTimestamp(_ date: Date) -> String {
