@@ -263,12 +263,20 @@ class AppData: ObservableObject {
         didSet { saveTheme() }
     }
     
+    /// iCloud sync (roadmap item 8). Owns the CloudKit sync; the
+    /// local UserDefaults persistence above stays the source of
+    /// truth, so the app works fully offline when iCloud is
+    /// unavailable.
+    let syncManager: CloudKitSyncManager
+
     let undoManager = UndoManager()
-    
+
     init() {
         loadData()
         loadFolders()
         loadTheme()
+        syncManager = CloudKitSyncManager()
+        syncManager.attach(to: self)
     }
     
     func saveData() {
