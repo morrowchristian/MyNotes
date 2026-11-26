@@ -66,17 +66,21 @@ final class PageUndoCoordinator: ObservableObject {
 struct PageView: View {
     @Binding var page: Page
     @ObservedObject var appData: AppData
-    
+    // The selected page, shared with MainView/SidebarView. A link block
+    // sets this to its target page's id to navigate to it.
+    @Binding var selectedPageID: UUID?
+
     @StateObject private var undoCoordinator: PageUndoCoordinator
-    
+
     // Initialize coordinator
-    init(page: Binding<Page>, appData: AppData) {
+    init(page: Binding<Page>, appData: AppData, selectedPageID: Binding<UUID?>) {
         self._page = page
         self.appData = appData
+        self._selectedPageID = selectedPageID
         let coordinator = PageUndoCoordinator(page: page, undoManager: appData.undoManager)
         self._undoCoordinator = StateObject(wrappedValue: coordinator)
     }
-    
+
     @State private var selectedBlockType: BlockType = .text
     @State private var newContent: String = ""
     @State private var currentMonth = Date()
@@ -89,6 +93,14 @@ struct PageView: View {
     @State private var previewBlockID: UUID?
     @State private var showingImagePicker = false
     @State private var selectedPhoto: PhotosPickerItem?
+    @State private var showingLinkPicker = false
+    // @ mention state: which text block has an active "@" and the
+    // query typed after it. Nil/empty when no mention is active.
+    @State private var mentionBlockID: UUID?
+    @State private var mentionQuery: String = ""
+    // Which text block's editor has focus. When focus leaves the block
+    // with the active @ mention, the suggestions dismiss.
+    @FocusState private var focusedTextBlockID: UUID?
 
     var body: some View {
         VStack {
@@ -183,6 +195,21 @@ struct PageView: View {
                 }
             }
         }
+        .sheet(isPresented: $showingLinkPicker) {
+            PagePickerSheet(
+                pages: appData.pages.filter { $0.id != page.id },
+                onPick: { target in
+                    page.blocks.append(Block(id: UUID(), type: .link, content: target.title, linkedPageID: target.id))
+                }
+            )
+        }
+        .onChange(of: focusedTextBlockID) { _, newValue in
+            // Focus moved away from the block with the active @ mention
+            // (to another block, or nowhere) — dismiss the suggestions.
+            if newValue != mentionBlockID {
+                clearMention()
+            }
+        }
     }
 
     // MARK: - Block View
@@ -191,11 +218,22 @@ struct PageView: View {
         let block = $page.blocks[index]
         switch block.wrappedValue.type {
         case .text:
-            TextEditor(text: block.content)
-                .frame(minHeight: 100)
-                .background(Color(.systemGray6))
-                .cornerRadius(12)
-                .padding(4)
+            VStack(alignment: .leading, spacing: 6) {
+                TextEditor(text: block.content)
+                    .frame(minHeight: 100)
+                    .background(Color(.systemGray6))
+                    .cornerRadius(12)
+                    .padding(4)
+                    .focused($focusedTextBlockID, equals: block.wrappedValue.id)
+                    .onChange(of: block.wrappedValue.content) { _, newValue in
+                        updateMention(for: newValue, in: block.wrappedValue.id)
+                    }
+                // @ mention suggestions for this block, if it has an
+                // active "@" being typed.
+                if mentionBlockID == block.wrappedValue.id {
+                    mentionSuggestionsView(at: index)
+                }
+            }
         case .todo:
             HStack {
                 Image(systemName: block.wrappedValue.isCompleted ? "checkmark.square.fill" : "square")
@@ -275,6 +313,8 @@ struct PageView: View {
             .padding(10)
             .background(Color(.systemGray6))
             .cornerRadius(12)
+        case .link:
+            linkBlockView(block: block)
         }
     }
 
@@ -415,6 +455,12 @@ struct PageView: View {
             return
         }
 
+        // Link blocks are added from the page picker, not from typed content.
+        if selectedBlockType == .link {
+            showingLinkPicker = true
+            return
+        }
+
         let trimmed = newContent.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty || selectedBlockType == .calendar || selectedBlockType == .divider else { return }
         
@@ -440,6 +486,134 @@ struct PageView: View {
             image.draw(in: CGRect(origin: .zero, size: targetSize))
         }
         return resized.jpegData(compressionQuality: 0.8)
+    }
+
+    // MARK: - Link Block
+    /// A link block: a tappable row that navigates to the target page.
+    /// If the target page was deleted, it degrades to a muted,
+    /// non-tappable "(deleted)" row instead of crashing.
+    @ViewBuilder
+    private func linkBlockView(block: Binding<Block>) -> some View {
+        let resolved = block.wrappedValue.linkedPageID
+            .flatMap { id in appData.pages.first(where: { $0.id == id }) }
+        if let target = resolved {
+            Button {
+                selectedPageID = target.id
+            } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: "link")
+                        .foregroundStyle(.blue)
+                    Text(block.wrappedValue.content.isEmpty ? target.title : block.wrappedValue.content)
+                        .foregroundStyle(.blue)
+                        .underline()
+                    Spacer()
+                    Image(systemName: "chevron.right")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                .padding(12)
+                .background(Color(.systemGray6))
+                .cornerRadius(12)
+            }
+            .buttonStyle(.plain)
+        } else {
+            HStack(spacing: 8) {
+                Image(systemName: "link")
+                    .foregroundStyle(.secondary)
+                Text("\(block.wrappedValue.content) (deleted)")
+                    .foregroundStyle(.secondary)
+                Spacer()
+            }
+            .padding(12)
+            .background(Color(.systemGray6))
+            .cornerRadius(12)
+        }
+    }
+
+    // MARK: - @ Mentions (Page Links)
+    /// Pages whose titles match the @ mention query (case-insensitive),
+    /// excluding the current page. An empty query matches all other
+    /// pages, so typing "@" alone lists every page to link to.
+    private func suggestions(for query: String) -> [Page] {
+        let others = appData.pages.filter { $0.id != page.id }
+        guard !query.isEmpty else { return others }
+        return others.filter { $0.title.localizedCaseInsensitiveContains(query) }
+    }
+
+    /// Updates the @ mention state for a text block. A mention is
+    /// active when the text's last "@" starts a word (at the start of
+    /// the text, or preceded by whitespace) and only non-whitespace
+    /// characters follow it — i.e. the user is typing a page title
+    /// right after "@". The word-boundary check keeps email addresses
+    /// like "bob@example.com" from triggering suggestions.
+    private func updateMention(for text: String, in blockID: UUID) {
+        guard let atIndex = text.lastIndex(of: "@") else {
+            clearMention()
+            return
+        }
+        let afterAt = String(text[text.index(after: atIndex)...])
+        let precededByBoundary: Bool = {
+            if atIndex == text.startIndex { return true }
+            return text[text.index(before: atIndex)].isWhitespace
+        }()
+        let isCleanQuery = !afterAt.contains(where: { $0.isWhitespace })
+        if precededByBoundary && isCleanQuery {
+            mentionBlockID = blockID
+            mentionQuery = afterAt
+        } else {
+            clearMention()
+        }
+    }
+
+    private func clearMention() {
+        mentionBlockID = nil
+        mentionQuery = ""
+    }
+
+    /// Inserts a link block right after the text block at `index`,
+    /// pointing at `target`, and dismisses the suggestions. The "@..."
+    /// text the user typed is left as-is in the text block. The insert
+    /// position is clamped so a stale index can never crash.
+    private func insertLinkBlock(after index: Int, target: Page) {
+        let link = Block(id: UUID(), type: .link, content: target.title, linkedPageID: target.id)
+        page.blocks.insert(link, at: min(index + 1, page.blocks.count))
+        clearMention()
+    }
+
+    /// The @ suggestion list shown under a text block with an active
+    /// mention: matching page titles, one tap inserts the link.
+    @ViewBuilder
+    private func mentionSuggestionsView(at index: Int) -> some View {
+        let matches = suggestions(for: mentionQuery)
+        if !matches.isEmpty {
+            VStack(alignment: .leading, spacing: 0) {
+                ForEach(matches) { target in
+                    Button {
+                        insertLinkBlock(after: index, target: target)
+                    } label: {
+                        HStack {
+                            Image(systemName: "link")
+                                .foregroundStyle(.secondary)
+                            Text(target.title)
+                                .foregroundStyle(.primary)
+                            Spacer()
+                        }
+                        .padding(.vertical, 8)
+                        .padding(.horizontal, 10)
+                    }
+                    .buttonStyle(.plain)
+                    if target.id != matches.last?.id {
+                        Divider()
+                    }
+                }
+            }
+            .background(Color(.systemBackground))
+            .cornerRadius(10)
+            .overlay(
+                RoundedRectangle(cornerRadius: 10)
+                    .stroke(Color(.systemGray4), lineWidth: 1)
+            )
+        }
     }
 
     // MARK: - Undo Snackbar
@@ -551,6 +725,49 @@ struct PageView: View {
         case .divider: return "minus"
         case .image: return "photo"
         case .toggle: return "list.bullet"
+        case .link: return "link"
+        }
+    }
+}
+
+// MARK: - Page Picker Sheet
+/// Sheet for picking the target page of a new link block.
+/// Shows all pages except the current one.
+struct PagePickerSheet: View {
+    let pages: [Page]
+    let onPick: (Page) -> Void
+    @Environment(\.dismiss) var dismiss
+
+    var body: some View {
+        NavigationStack {
+            Group {
+                if pages.isEmpty {
+                    Text("No other pages to link to yet.")
+                        .foregroundStyle(.secondary)
+                        .padding()
+                } else {
+                    List(pages) { target in
+                        Button {
+                            onPick(target)
+                            dismiss()
+                        } label: {
+                            HStack {
+                                Image(systemName: "link")
+                                    .foregroundStyle(.secondary)
+                                Text(target.title)
+                                    .foregroundStyle(.primary)
+                                Spacer()
+                            }
+                        }
+                    }
+                }
+            }
+            .navigationTitle("Link to Page")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+            }
         }
     }
 }

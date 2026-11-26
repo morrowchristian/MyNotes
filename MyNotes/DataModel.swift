@@ -11,6 +11,7 @@ enum BlockType: String, Codable, CaseIterable {
     case divider
     case image
     case toggle
+    case link
 
     /// The label shown for this type in the Add Block picker.
     var displayName: String {
@@ -23,6 +24,7 @@ enum BlockType: String, Codable, CaseIterable {
         case .divider: return "Divider"
         case .image: return "Image"
         case .toggle: return "Toggle List"
+        case .link: return "Page Link"
         }
     }
 
@@ -30,7 +32,7 @@ enum BlockType: String, Codable, CaseIterable {
     /// (the Add Block bar hides the content field for these).
     var hidesContentInput: Bool {
         switch self {
-        case .calendar, .divider, .image: return true
+        case .calendar, .divider, .image, .link: return true
         case .text, .todo, .quote, .code, .toggle: return false
         }
     }
@@ -93,14 +95,16 @@ struct Block: Identifiable, Codable {
     var isExpanded: Bool = true
     /// The body text of a toggle-list block (one item per line).
     var detail: String = ""
+    /// The id of the page a link block points to. Nil for other types.
+    var linkedPageID: UUID? = nil
 }
 
 // MARK: - Block decoding (backward compatible)
-// The imageData, isExpanded, and detail fields were added after the
-// first release, so pages saved by earlier versions do not have
-// those keys. Decode them with decodeIfPresent so old data still
-// loads. (The custom init lives in an extension so the memberwise
-// initializer used by Templates and addBlock() is preserved.)
+// The imageData, isExpanded, detail, and linkedPageID fields were
+// added after the first release, so pages saved by earlier versions
+// do not have those keys. Decode them with decodeIfPresent so old
+// data still loads. (The custom init lives in an extension so the
+// memberwise initializer used by Templates and addBlock() is preserved.)
 extension Block {
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
@@ -112,6 +116,7 @@ extension Block {
         imageData = try container.decodeIfPresent(Data.self, forKey: .imageData)
         isExpanded = try container.decodeIfPresent(Bool.self, forKey: .isExpanded) ?? true
         detail = try container.decodeIfPresent(String.self, forKey: .detail) ?? ""
+        linkedPageID = try container.decodeIfPresent(UUID.self, forKey: .linkedPageID)
     }
 }
 
