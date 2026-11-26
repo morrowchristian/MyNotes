@@ -2,6 +2,21 @@
 import SwiftUI
 import Combine
 
+// MARK: - Event Color
+extension EventColor {
+    /// The SwiftUI color for this event color.
+    var color: Color {
+        switch self {
+        case .blue: return .blue
+        case .green: return .green
+        case .orange: return .orange
+        case .red: return .red
+        case .purple: return .purple
+        case .pink: return .pink
+        }
+    }
+}
+
 // MARK: - Undo Coordinator (Class)
 final class PageUndoCoordinator: ObservableObject {
     @Published var showingUndo = false
@@ -67,7 +82,10 @@ struct PageView: View {
     @State private var showingEventSheet = false
     @State private var selectedDate: Date?
     @State private var eventText: String = ""
+    @State private var eventColor: EventColor = .blue
     @State private var editingBlockID: UUID?
+    @State private var previewDate: Date?
+    @State private var previewBlockID: UUID?
 
     var body: some View {
         VStack {
@@ -136,8 +154,9 @@ struct PageView: View {
             EventEditSheet(
                 date: selectedDate ?? Date(),
                 text: $eventText,
-                onSave: { text in
-                    saveEvent(text: text)
+                color: $eventColor,
+                onSave: { text, color in
+                    saveEvent(text: text, color: color)
                 }
             )
         }
@@ -179,18 +198,24 @@ struct PageView: View {
     private func calendarBlockView(block: Binding<Block>) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
-                Button("<") {
+                Button {
                     currentMonth = Calendar.current.date(byAdding: .month, value: -1, to: currentMonth)!
+                } label: {
+                    Image(systemName: "chevron.left")
+                        .font(.title3)
+                        .frame(minWidth: 44, minHeight: 44)
                 }
-                .font(.title2)
                 Spacer()
                 Text(currentMonth, format: .dateTime.year().month())
                     .font(.headline)
                 Spacer()
-                Button(">") {
+                Button {
                     currentMonth = Calendar.current.date(byAdding: .month, value: 1, to: currentMonth)!
+                } label: {
+                    Image(systemName: "chevron.right")
+                        .font(.title3)
+                        .frame(minWidth: 44, minHeight: 44)
                 }
-                .font(.title2)
             }
             .padding(.horizontal)
 
@@ -203,40 +228,48 @@ struct PageView: View {
                 }
                 ForEach(days, id: \.self) { date in
                     if let date = date {
-                        let hasEvent = block.wrappedValue.events[date.startOfDay] != nil
+                        let event = block.wrappedValue.events[date.startOfDay]
                         Button {
-                            openEventEditor(for: date, in: block.wrappedValue)
+                            handleDateTap(for: date, in: block.wrappedValue)
                         } label: {
-                            VStack(spacing: 2) {
+                            VStack(spacing: 3) {
                                 Text("\(Calendar.current.component(.day, from: date))")
-                                    .font(.system(size: 14))
-                                if hasEvent {
-                                    Circle().fill(Color.blue).frame(width: 6, height: 6)
+                                    .font(.system(size: 16))
+                                if let event = event {
+                                    Circle().fill(event.color.color).frame(width: 8, height: 8)
                                 }
                             }
-                            .frame(maxWidth: .infinity, minHeight: 40)
+                            .frame(maxWidth: .infinity, minHeight: 54)
                             .background(
-                                RoundedRectangle(cornerRadius: 8)
+                                RoundedRectangle(cornerRadius: 10)
                                     .fill(isToday(date) ? Color.blue.opacity(0.2) : Color.clear)
                             )
                         }
                     } else {
-                        Color.clear.frame(height: 40)
+                        Color.clear.frame(height: 54)
                     }
                 }
             }
             .padding(.horizontal)
+
+            // Event preview — shown when a date with an event is tapped.
+            if let previewDay = previewDate,
+               previewBlockID == block.wrappedValue.id,
+               let event = block.wrappedValue.events[previewDay] {
+                eventPreviewCard(date: previewDay, event: event, block: block)
+            }
 
             if !block.wrappedValue.events.isEmpty {
                 Divider()
                 Text("Events")
                     .font(.subheadline)
                     .padding(.top)
-                ForEach(Array(block.wrappedValue.events.sorted(by: { $0.key < $1.key })), id: \.key) { date, note in
+                ForEach(Array(block.wrappedValue.events.sorted(by: { $0.key < $1.key })), id: \.key) { date, event in
                     HStack {
+                        Circle().fill(event.color.color).frame(width: 8, height: 8)
                         Text(date.formatted(date: .abbreviated, time: .omitted))
                             .foregroundStyle(.secondary)
-                        Text(note)
+                        Text(event.text)
                         Spacer()
                         Button("Edit") {
                             openEventEditor(for: date, in: block.wrappedValue)
@@ -250,6 +283,44 @@ struct PageView: View {
         .padding()
         .background(Color(.systemGray6))
         .cornerRadius(16)
+    }
+
+    // MARK: - Event Preview Card
+    @ViewBuilder
+    private func eventPreviewCard(date: Date, event: CalendarEvent, block: Binding<Block>) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Circle().fill(event.color.color).frame(width: 10, height: 10)
+                Text(date.formatted(date: .abbreviated, time: .omitted))
+                    .font(.subheadline).bold()
+                Spacer()
+                Button {
+                    previewDate = nil
+                    previewBlockID = nil
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.borderless)
+            }
+            Text(event.text)
+                .font(.body)
+            HStack(spacing: 12) {
+                Button("Edit") {
+                    openEventEditor(for: date, in: block.wrappedValue)
+                }
+                .buttonStyle(.bordered)
+                Button("Delete") {
+                    deleteEvent(for: date, in: block.wrappedValue.id)
+                }
+                .buttonStyle(.bordered)
+                .foregroundStyle(.red)
+            }
+        }
+        .padding(12)
+        .background(Color(.systemBackground))
+        .cornerRadius(12)
     }
 
     // MARK: - Add Block
@@ -288,14 +359,40 @@ struct PageView: View {
     }
 
     // MARK: - Calendar Helpers
+    private func handleDateTap(for date: Date, in block: Block) {
+        let day = date.startOfDay
+        if block.events[day] != nil {
+            // This date has an event — show the preview. Tapping the
+            // same date again hides it.
+            if previewDate == day && previewBlockID == block.id {
+                previewDate = nil
+                previewBlockID = nil
+            } else {
+                previewDate = day
+                previewBlockID = block.id
+            }
+        } else {
+            // No event yet — go straight to creating one.
+            previewDate = nil
+            previewBlockID = nil
+            openEventEditor(for: date, in: block)
+        }
+    }
+
     private func openEventEditor(for date: Date, in block: Block) {
         selectedDate = date
-        eventText = block.events[date.startOfDay] ?? ""
+        if let event = block.events[date.startOfDay] {
+            eventText = event.text
+            eventColor = event.color
+        } else {
+            eventText = ""
+            eventColor = .blue
+        }
         editingBlockID = block.id
         showingEventSheet = true
     }
 
-    private func saveEvent(text: String) {
+    private func saveEvent(text: String, color: EventColor) {
         guard let blockID = editingBlockID,
               let pageIndex = appData.pages.firstIndex(where: { $0.id == page.id }),
               let blockIndex = appData.pages[pageIndex].blocks.firstIndex(where: { $0.id == blockID }),
@@ -307,8 +404,16 @@ struct PageView: View {
         if trimmed.isEmpty {
             appData.pages[pageIndex].blocks[blockIndex].events.removeValue(forKey: key)
         } else {
-            appData.pages[pageIndex].blocks[blockIndex].events[key] = trimmed
+            appData.pages[pageIndex].blocks[blockIndex].events[key] = CalendarEvent(text: trimmed, color: color)
         }
+    }
+
+    private func deleteEvent(for date: Date, in blockID: UUID) {
+        guard let pageIndex = appData.pages.firstIndex(where: { $0.id == page.id }),
+              let blockIndex = appData.pages[pageIndex].blocks.firstIndex(where: { $0.id == blockID }) else { return }
+        appData.pages[pageIndex].blocks[blockIndex].events.removeValue(forKey: date.startOfDay)
+        previewDate = nil
+        previewBlockID = nil
     }
 
     private func generateDaysInMonth(for date: Date) -> [Date?] {
@@ -343,7 +448,8 @@ struct PageView: View {
 struct EventEditSheet: View {
     let date: Date
     @Binding var text: String
-    let onSave: (String) -> Void
+    @Binding var color: EventColor
+    let onSave: (String, EventColor) -> Void
     @Environment(\.dismiss) var dismiss
 
     var body: some View {
@@ -353,6 +459,28 @@ struct EventEditSheet: View {
                     TextField("Enter event...", text: $text, axis: .vertical)
                         .lineLimit(3...)
                 }
+                Section("Color") {
+                    HStack(spacing: 16) {
+                        ForEach(EventColor.allCases, id: \.self) { eventColor in
+                            Button {
+                                color = eventColor
+                            } label: {
+                                ZStack {
+                                    Circle()
+                                        .fill(eventColor.color)
+                                        .frame(width: 32, height: 32)
+                                    if color == eventColor {
+                                        Image(systemName: "checkmark")
+                                            .foregroundColor(.white)
+                                            .font(.caption.bold())
+                                    }
+                                }
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    .padding(.vertical, 4)
+                }
             }
             .navigationTitle("Edit Event")
             .toolbar {
@@ -361,7 +489,7 @@ struct EventEditSheet: View {
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save") {
-                        onSave(text)
+                        onSave(text, color)
                         dismiss()
                     }
                 }
