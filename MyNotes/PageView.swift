@@ -195,6 +195,31 @@ struct PageView: View {
         }
         .navigationTitle(page.title)
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            // Export (roadmap item 10): one entry point, three options
+            // for the current page — Markdown, PDF, or Print.
+            ToolbarItem(placement: .primaryAction) {
+                Menu {
+                    Button {
+                        exportAsMarkdown()
+                    } label: {
+                        Label("Export as Markdown", systemImage: "doc.text")
+                    }
+                    Button {
+                        exportAsPDF()
+                    } label: {
+                        Label("Export as PDF", systemImage: "doc.richtext")
+                    }
+                    Button {
+                        printPage()
+                    } label: {
+                        Label("Print", systemImage: "printer")
+                    }
+                } label: {
+                    Label("Export", systemImage: "square.and.arrow.up")
+                }
+            }
+        }
         .sheet(isPresented: $showingEventSheet) {
             EventEditSheet(
                 date: selectedDate ?? Date(),
@@ -818,6 +843,33 @@ struct PageView: View {
         case .toggle: return "list.bullet"
         case .link: return "link"
         }
+    }
+
+    // MARK: - Export (roadmap item 10)
+    /// Exports the current page as Markdown and opens the share sheet
+    /// so it can be saved to Files, sent, etc.
+    @MainActor
+    private func exportAsMarkdown() {
+        let markdown = MarkdownExporter.markdown(for: page)
+        let fileName = "\(ExportFile.safeFileName(from: page.title)).md"
+        guard let url = ExportFile.temporaryFileURL(data: Data(markdown.utf8), fileName: fileName) else { return }
+        ExportPresenter.presentShareSheet(items: [url])
+    }
+
+    /// Renders the current page to PDF and opens the share sheet.
+    @MainActor
+    private func exportAsPDF() {
+        guard let pdfData = PDFExporter.pdfData(for: page) else { return }
+        let fileName = "\(ExportFile.safeFileName(from: page.title)).pdf"
+        guard let url = ExportFile.temporaryFileURL(data: pdfData, fileName: fileName) else { return }
+        ExportPresenter.presentShareSheet(items: [url])
+    }
+
+    /// Renders the current page to PDF and opens the print sheet.
+    @MainActor
+    private func printPage() {
+        guard let pdfData = PDFExporter.pdfData(for: page) else { return }
+        ExportPresenter.presentPrintSheet(pdfData: pdfData, jobName: page.title)
     }
 }
 
