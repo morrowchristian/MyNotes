@@ -17,7 +17,7 @@ struct MainView: View {
                         appData.pages[pageIndex] = newPage
                     }
                 )
-                PageView(page: pageBinding, appData: appData)
+                PageView(page: pageBinding, appData: appData, selectedPageID: $selectedPageID)
             } else {
                 Text("Select a page")
                     .font(.title2)
