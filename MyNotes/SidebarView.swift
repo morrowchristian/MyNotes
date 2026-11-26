@@ -8,6 +8,12 @@ final class SidebarUndoCoordinator: ObservableObject {
     @Published var showingUndo = false
     @Published var deletedPages: [Page] = []
     @Published var deletedIndices: IndexSet = []
+    // Folder membership of each deleted page, for restoring it on Undo:
+    // (page id, folder id, index within that folder's page list).
+    private var deletedPageFolderInfo: [(pageID: UUID, folderID: UUID, indexInFolder: Int)] = []
+    // Folder delete (undo restores the folder; its pages were never deleted).
+    @Published var deletedFolder: Folder? = nil
+    @Published var deletedFolderIndex: Int? = nil
 
     private var appData: AppData
     private var selectedPageID: Binding<UUID?>
@@ -18,9 +24,31 @@ final class SidebarUndoCoordinator: ObservableObject {
         self.selectedPageID = selectedPageID
     }
 
-    func delete(at offsets: IndexSet) {
-        deletedPages = offsets.map { appData.pages[$0] }
-        deletedIndices = offsets
+    /// Delete the given pages. The sidebar resolves the swiped rows to
+    /// Page objects (the rows live in different sections — ungrouped and
+    /// per-folder — so offsets into `appData.pages` would be wrong).
+    func delete(pages: [Page]) {
+        // Capture the pages and their positions in appData.pages, sorted
+        // by index so Undo re-inserts them in ascending order.
+        let indexed = pages.compactMap { page -> (Page, Int)? in
+            guard let index = appData.pages.firstIndex(where: { $0.id == page.id }) else { return nil }
+            return (page, index)
+        }.sorted { $0.1 < $1.1 }
+        deletedPages = indexed.map { $0.0 }
+        deletedIndices = IndexSet(indexed.map { $0.1 })
+
+        // Capture folder membership so Undo can restore it.
+        deletedPageFolderInfo = deletedPages.compactMap { page -> (pageID: UUID, folderID: UUID, indexInFolder: Int)? in
+            guard let folder = appData.folderContaining(pageID: page.id),
+                  let indexInFolder = folder.pageIDs.firstIndex(of: page.id) else { return nil }
+            return (pageID: page.id, folderID: folder.id, indexInFolder: indexInFolder)
+        }
+
+        // A page delete supersedes a pending folder-delete snackbar
+        // (and vice versa) — the snackbar always describes the most
+        // recent deletion, matching the UndoManager's top registration.
+        deletedFolder = nil
+        deletedFolderIndex = nil
 
         // Remember the selected page if it is among the deleted ones,
         // so Undo can re-select it.
@@ -36,7 +64,12 @@ final class SidebarUndoCoordinator: ObservableObject {
         }
 
         withAnimation {
-            appData.pages.remove(atOffsets: offsets)
+            for page in deletedPages {
+                appData.removePageFromFolders(page.id)
+            }
+            appData.pages.removeAll { page in
+                deletedPages.contains { $0.id == page.id }
+            }
             if deletedSelectedPageID != nil {
                 selectedPageID.wrappedValue = nil
             }
@@ -53,10 +86,55 @@ final class SidebarUndoCoordinator: ObservableObject {
     private func performUndo() {
         withAnimation {
             for (page, index) in zip(deletedPages, deletedIndices) {
-                appData.pages.insert(page, at: index)
+                let clamped = min(max(index, 0), appData.pages.count)
+                appData.pages.insert(page, at: clamped)
+                // Restore folder membership, if the folder still exists.
+                // (If the folder was itself deleted since, the page
+                // simply stays ungrouped.)
+                if let info = deletedPageFolderInfo.first(where: { $0.pageID == page.id }) {
+                    appData.insertPage(page.id, intoFolder: info.folderID, at: info.indexInFolder)
+                }
             }
             if let restoredID = deletedSelectedPageID {
                 selectedPageID.wrappedValue = restoredID
+            }
+            showingUndo = false
+        }
+    }
+
+    /// Delete a folder. Its pages are NOT deleted — they become ungrouped.
+    func deleteFolder(_ folder: Folder) {
+        guard let index = appData.folders.firstIndex(where: { $0.id == folder.id }) else { return }
+        deletedFolder = folder
+        deletedFolderIndex = index
+
+        // A folder delete supersedes a pending page-delete snackbar
+        // (and vice versa).
+        deletedPages = []
+        deletedIndices = []
+        deletedPageFolderInfo = []
+
+        appData.undoManager.registerUndo(withTarget: self) { coordinator in
+            coordinator.performFolderUndo()
+        }
+
+        withAnimation {
+            appData.folders.remove(at: index)
+            showingUndo = true
+        }
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
+            withAnimation {
+                self.showingUndo = false
+            }
+        }
+    }
+
+    private func performFolderUndo() {
+        withAnimation {
+            if let folder = deletedFolder, let index = deletedFolderIndex {
+                let clamped = min(max(index, 0), appData.folders.count)
+                appData.folders.insert(folder, at: clamped)
             }
             showingUndo = false
         }
@@ -81,22 +159,58 @@ struct SidebarView: View {
     @State private var chosenTemplate: Template = .blank
     @State private var newTitle = "New Page"
 
+    @State private var showingNewFolderAlert = false
+    @State private var newFolderName = "New Folder"
+    @State private var showingRenameAlert = false
+    @State private var folderToRename: Folder? = nil
+    @State private var renameText = ""
+
+    /// Pages in no folder, in `appData.pages` order. These show at the
+    /// top level of the sidebar.
+    private var ungroupedPages: [Page] {
+        appData.pages.filter { page in
+            appData.folderContaining(pageID: page.id) == nil
+        }
+    }
+
+    /// A folder's pages, in the folder's order. Only pages that still
+    /// exist are shown, so a stale id (e.g. a page deleted before its
+    /// folder entry was cleaned up) never renders or crashes.
+    private func folderPages(_ folder: Folder) -> [Page] {
+        folder.pageIDs.compactMap { id in
+            appData.pages.first { $0.id == id }
+        }
+    }
+
+    /// Folders a page can be moved into (every folder except the one
+    /// it is already in).
+    private func moveTargets(for page: Page) -> [Folder] {
+        let currentID = appData.folderContaining(pageID: page.id)?.id
+        return appData.folders.filter { $0.id != currentID }
+    }
+
     var body: some View {
         ZStack(alignment: .bottom) {
             List(selection: $selectedPageID) {
-                Section(header: Text("Pages")) {
-                    ForEach(appData.pages) { page in
-                        NavigationLink(value: page.id) {
-                            VStack(alignment: .leading) {
-                                Text(page.title)
-                                Text(AppData.formatTimestamp(page.createdAt))
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
+                if !ungroupedPages.isEmpty {
+                    Section(header: Text("Pages")) {
+                        ForEach(ungroupedPages) { page in
+                            pageRow(page)
                         }
                     }
-                    .onDelete { indices in
-                        undoCoordinator.delete(at: indices)
+                }
+
+                if !appData.folders.isEmpty {
+                    Section(header: Text("Folders")) {
+                        ForEach(appData.folders) { folder in
+                            folderRow(folder)
+                            if folder.isExpanded {
+                                ForEach(folderPages(folder)) { page in
+                                    pageRow(page)
+                                        .padding(.leading, 20)
+                                }
+                            }
+                        }
                     }
                 }
 
@@ -140,6 +254,44 @@ struct SidebarView: View {
                     }
                     .padding()
                 }
+
+                Button("New Folder") {
+                    newFolderName = "New Folder"
+                    showingNewFolderAlert = true
+                }
+            }
+            .alert("New Folder", isPresented: $showingNewFolderAlert) {
+                TextField("Name", text: $newFolderName)
+                Button("Create") {
+                    let name = newFolderName.trimmingCharacters(in: .whitespacesAndNewlines)
+                    let folder = Folder(
+                        id: UUID(),
+                        name: name.isEmpty ? "New Folder" : name,
+                        pageIDs: [],
+                        isExpanded: true
+                    )
+                    appData.folders.append(folder)
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("Enter a name for the new folder.")
+            }
+            .alert("Rename Folder", isPresented: $showingRenameAlert) {
+                TextField("Name", text: $renameText)
+                Button("Rename") {
+                    if let folder = folderToRename {
+                        let name = renameText.trimmingCharacters(in: .whitespacesAndNewlines)
+                        if !name.isEmpty {
+                            appData.renameFolder(id: folder.id, to: name)
+                        }
+                    }
+                    folderToRename = nil
+                }
+                Button("Cancel", role: .cancel) {
+                    folderToRename = nil
+                }
+            } message: {
+                Text("Enter a new name for the folder.")
             }
 
             // Undo Snackbar
@@ -152,13 +304,89 @@ struct SidebarView: View {
         .navigationTitle("Workspace")
     }
 
+    // MARK: - Rows
+
+    /// A page row: tap to select it, swipe to delete it, long-press for
+    /// the Move to Folder menu.
+    private func pageRow(_ page: Page) -> some View {
+        NavigationLink(value: page.id) {
+            VStack(alignment: .leading) {
+                Text(page.title)
+                Text(AppData.formatTimestamp(page.createdAt))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+            Button(role: .destructive) {
+                undoCoordinator.delete(pages: [page])
+            } label: {
+                Label("Delete", systemImage: "trash")
+            }
+        }
+        .contextMenu {
+            if !moveTargets(for: page).isEmpty {
+                Menu("Move to Folder") {
+                    ForEach(moveTargets(for: page)) { folder in
+                        Button(folder.name) {
+                            appData.movePage(page.id, to: folder.id)
+                        }
+                    }
+                }
+            }
+            if appData.folderContaining(pageID: page.id) != nil {
+                Button("Remove from Folder") {
+                    appData.movePage(page.id, to: nil)
+                }
+            }
+        }
+    }
+
+    /// A folder row: tap the chevron/name to expand or collapse it.
+    /// Long-press for Rename / Delete Folder.
+    private func folderRow(_ folder: Folder) -> some View {
+        Button {
+            appData.setFolderExpanded(id: folder.id, isExpanded: !folder.isExpanded)
+        } label: {
+            HStack {
+                Image(systemName: folder.isExpanded ? "chevron.down" : "chevron.right")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Image(systemName: "folder")
+                    .foregroundStyle(.secondary)
+                Text(folder.name)
+                    .font(.headline)
+                Spacer()
+                Text("\(folderPages(folder).count)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .buttonStyle(.plain)
+        .contextMenu {
+            Button("Rename") {
+                folderToRename = folder
+                renameText = folder.name
+                showingRenameAlert = true
+            }
+            Button("Delete Folder", role: .destructive) {
+                undoCoordinator.deleteFolder(folder)
+            }
+        }
+    }
+
     // MARK: - Undo Snackbar
     @ViewBuilder
     private func undoSnackbar() -> some View {
         HStack {
-            let count = undoCoordinator.deletedPages.count
-            Text("\(count == 1 ? "Page" : "\(count) pages") deleted")
-                .font(.subheadline)
+            if let folder = undoCoordinator.deletedFolder {
+                Text("Folder \"\(folder.name)\" deleted")
+                    .font(.subheadline)
+            } else {
+                let count = undoCoordinator.deletedPages.count
+                Text("\(count == 1 ? "Page" : "\(count) pages") deleted")
+                    .font(.subheadline)
+            }
             Spacer()
             Button("Undo") {
                 appData.undoManager.undo()
