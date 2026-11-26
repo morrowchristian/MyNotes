@@ -442,6 +442,8 @@ struct PageView: View {
             linkBlockView(block: block)
         case .audio:
             audioBlockView(block: block)
+        case .drawing:
+            drawingBlockView(block: block)
         }
     }
 
@@ -591,7 +593,7 @@ struct PageView: View {
         }
 
         let trimmed = newContent.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty || selectedBlockType == .calendar || selectedBlockType == .divider || selectedBlockType == .audio else { return }
+        guard !trimmed.isEmpty || selectedBlockType == .calendar || selectedBlockType == .divider || selectedBlockType == .audio || selectedBlockType == .drawing else { return }
         
         var newBlock = Block(id: UUID(), type: selectedBlockType)
         if selectedBlockType != .calendar && selectedBlockType != .divider {
@@ -674,6 +676,26 @@ struct PageView: View {
             onRecordingFinished: { data in
                 if let index = page.blocks.firstIndex(where: { $0.id == blockID }) {
                     page.blocks[index].audioData = data
+                }
+            }
+        )
+    }
+
+    // MARK: - Drawing Block (roadmap item 14)
+    /// A handwriting/drawing block. The finish closure writes the
+    /// serialized PKDrawing into the block by id (looked up at
+    /// completion time), so a block deleted mid-edit is a no-op
+    /// instead of a crash through a stale binding. A nil data value
+    /// clears the drawing (the user tapped Done on an empty canvas).
+    @ViewBuilder
+    private func drawingBlockView(block: Binding<Block>) -> some View {
+        let blockID = block.wrappedValue.id
+        DrawingBlockView(
+            block: block,
+            accentColor: appData.theme.accentColor,
+            onDrawingFinished: { data in
+                if let index = page.blocks.firstIndex(where: { $0.id == blockID }) {
+                    page.blocks[index].drawingData = data
                 }
             }
         )
@@ -877,6 +899,7 @@ struct PageView: View {
         case .toggle: return "list.bullet"
         case .link: return "link"
         case .audio: return "mic"
+        case .drawing: return "pencil.and.scribble"
         }
     }
 

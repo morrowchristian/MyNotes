@@ -15,6 +15,7 @@ enum BlockType: String, Codable, CaseIterable {
     case toggle
     case link
     case audio
+    case drawing
 
     /// The label shown for this type in the Add Block picker.
     var displayName: String {
@@ -29,6 +30,7 @@ enum BlockType: String, Codable, CaseIterable {
         case .toggle: return "Toggle List"
         case .link: return "Page Link"
         case .audio: return "Voice Note"
+        case .drawing: return "Drawing"
         }
     }
 
@@ -36,7 +38,7 @@ enum BlockType: String, Codable, CaseIterable {
     /// (the Add Block bar hides the content field for these).
     var hidesContentInput: Bool {
         switch self {
-        case .calendar, .divider, .image, .link, .audio: return true
+        case .calendar, .divider, .image, .link, .audio, .drawing: return true
         case .text, .todo, .quote, .code, .toggle: return false
         }
     }
@@ -107,12 +109,19 @@ struct Block: Identifiable, Codable {
     /// the dataset bigger — there is no separate audio file store
     /// in v1.
     var audioData: Data? = nil
+    /// Handwriting/drawing for drawing blocks (a serialized
+    /// PKDrawing — compact vector data, much lighter than audio or
+    /// image data). Nil for other types. It rides along in the
+    /// saved page JSON and the iCloud snapshot like the other
+    /// block data; a corrupt/unreadable value is ignored and the
+    /// block shows an empty canvas.
+    var drawingData: Data? = nil
 }
 
 // MARK: - Block decoding (backward compatible)
-// The imageData, isExpanded, detail, linkedPageID, and audioData
-// fields were added after the first release, so pages saved by
-// earlier versions do not have those keys. Decode them with
+// The imageData, isExpanded, detail, linkedPageID, audioData, and
+// drawingData fields were added after the first release, so pages
+// saved by earlier versions do not have those keys. Decode them with
 // decodeIfPresent so old data still loads. (The custom init lives
 // in an extension so the memberwise initializer used by Templates
 // and addBlock() is preserved.)
@@ -129,6 +138,7 @@ extension Block {
         detail = try container.decodeIfPresent(String.self, forKey: .detail) ?? ""
         linkedPageID = try container.decodeIfPresent(UUID.self, forKey: .linkedPageID)
         audioData = try container.decodeIfPresent(Data.self, forKey: .audioData)
+        drawingData = try container.decodeIfPresent(Data.self, forKey: .drawingData)
     }
 }
 
@@ -334,8 +344,8 @@ struct WidgetPageSummary: Codable, Equatable {
     /// The readable text of a page as up to two lines, for the
     /// widget preview. Text-like blocks contribute their content;
     /// toggle lists contribute the label and the items; calendar
-    /// blocks contribute event text. Divider, image, and link
-    /// blocks carry no readable text.
+    /// blocks contribute event text. Divider, image, link, audio,
+    /// and drawing blocks carry no readable text.
     static func preview(for page: Page) -> String {
         var lines: [String] = []
         for block in page.blocks {
@@ -347,7 +357,7 @@ struct WidgetPageSummary: Codable, Equatable {
                 lines.append(contentsOf: block.detail.components(separatedBy: .newlines))
             case .calendar:
                 lines.append(contentsOf: block.events.values.flatMap { $0.text.components(separatedBy: .newlines) })
-            case .divider, .image, .link, .audio:
+            case .divider, .image, .link, .audio, .drawing:
                 break
             }
         }
