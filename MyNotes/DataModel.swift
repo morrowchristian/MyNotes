@@ -6,7 +6,34 @@ enum BlockType: String, Codable, CaseIterable {
     case text
     case todo
     case calendar
-    // TODO: Add more types
+    case quote
+    case code
+    case divider
+    case image
+    case toggle
+
+    /// The label shown for this type in the Add Block picker.
+    var displayName: String {
+        switch self {
+        case .text: return "Text"
+        case .todo: return "To-Do"
+        case .calendar: return "Calendar"
+        case .quote: return "Quote"
+        case .code: return "Code"
+        case .divider: return "Divider"
+        case .image: return "Image"
+        case .toggle: return "Toggle List"
+        }
+    }
+
+    /// Block types that are added without typing content first
+    /// (the Add Block bar hides the content field for these).
+    var hidesContentInput: Bool {
+        switch self {
+        case .calendar, .divider, .image: return true
+        case .text, .todo, .quote, .code, .toggle: return false
+        }
+    }
 }
 
 /// The color an event is shown with in the calendar, stored by name
@@ -60,6 +87,32 @@ struct Block: Identifiable, Codable {
     var content: String = ""
     var isCompleted: Bool = false
     var events: [Date: CalendarEvent] = [:]
+    /// Photo data for image blocks (downscaled JPEG). Nil for other types.
+    var imageData: Data? = nil
+    /// Whether a toggle-list block is expanded.
+    var isExpanded: Bool = true
+    /// The body text of a toggle-list block (one item per line).
+    var detail: String = ""
+}
+
+// MARK: - Block decoding (backward compatible)
+// The imageData, isExpanded, and detail fields were added after the
+// first release, so pages saved by earlier versions do not have
+// those keys. Decode them with decodeIfPresent so old data still
+// loads. (The custom init lives in an extension so the memberwise
+// initializer used by Templates and addBlock() is preserved.)
+extension Block {
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        type = try container.decode(BlockType.self, forKey: .type)
+        content = try container.decodeIfPresent(String.self, forKey: .content) ?? ""
+        isCompleted = try container.decodeIfPresent(Bool.self, forKey: .isCompleted) ?? false
+        events = try container.decodeIfPresent([Date: CalendarEvent].self, forKey: .events) ?? [:]
+        imageData = try container.decodeIfPresent(Data.self, forKey: .imageData)
+        isExpanded = try container.decodeIfPresent(Bool.self, forKey: .isExpanded) ?? true
+        detail = try container.decodeIfPresent(String.self, forKey: .detail) ?? ""
+    }
 }
 
 struct Page: Identifiable, Codable {

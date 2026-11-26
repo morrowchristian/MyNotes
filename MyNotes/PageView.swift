@@ -1,6 +1,7 @@
 //  PageView.swift
 import SwiftUI
 import Combine
+import PhotosUI
 
 // MARK: - Event Color
 extension EventColor {
@@ -86,6 +87,8 @@ struct PageView: View {
     @State private var editingBlockID: UUID?
     @State private var previewDate: Date?
     @State private var previewBlockID: UUID?
+    @State private var showingImagePicker = false
+    @State private var selectedPhoto: PhotosPickerItem?
 
     var body: some View {
         VStack {
@@ -120,13 +123,13 @@ struct PageView: View {
             HStack {
                 Picker("Add Layout", selection: $selectedBlockType) {
                     ForEach(BlockType.allCases, id: \.self) { type in
-                        Label(type.rawValue.capitalized, systemImage: icon(for: type))
+                        Label(type.displayName, systemImage: icon(for: type))
                             .tag(type)
                     }
                 }
                 .pickerStyle(.menu)
 
-                if selectedBlockType != .calendar {
+                if !selectedBlockType.hidesContentInput {
                     TextField("Content...", text: $newContent)
                         .textFieldStyle(.roundedBorder)
                 }
@@ -165,6 +168,21 @@ struct PageView: View {
                 appData.undoManager.undo()
             }
         }
+        .photosPicker(isPresented: $showingImagePicker, selection: $selectedPhoto, matching: .images)
+        .onChange(of: selectedPhoto) { _, newItem in
+            guard let newItem else { return }
+            Task {
+                if let data = try? await newItem.loadTransferable(type: Data.self),
+                   let jpegData = downscaledJPEGData(from: data) {
+                    await MainActor.run {
+                        page.blocks.append(Block(id: UUID(), type: .image, imageData: jpegData))
+                        selectedPhoto = nil
+                    }
+                } else {
+                    await MainActor.run { selectedPhoto = nil }
+                }
+            }
+        }
     }
 
     // MARK: - Block View
@@ -191,6 +209,72 @@ struct PageView: View {
             }
         case .calendar:
             calendarBlockView(block: block)
+        case .quote:
+            HStack(alignment: .top, spacing: 10) {
+                Rectangle()
+                    .fill(Color.blue)
+                    .frame(width: 4)
+                TextEditor(text: block.content)
+                    .italic()
+                    .frame(minHeight: 60)
+                    .scrollContentBackground(.hidden)
+            }
+            .padding(10)
+            .background(Color(.systemGray6))
+            .cornerRadius(12)
+        case .code:
+            TextEditor(text: block.content)
+                .font(.system(.body, design: .monospaced))
+                .foregroundColor(Color(white: 0.92))
+                .frame(minHeight: 80)
+                .scrollContentBackground(.hidden)
+                .padding(10)
+                .background(Color(red: 0.11, green: 0.12, blue: 0.15))
+                .cornerRadius(12)
+        case .divider:
+            Divider()
+                .padding(.vertical, 8)
+        case .image:
+            if let data = block.wrappedValue.imageData,
+               let uiImage = UIImage(data: data) {
+                Image(uiImage: uiImage)
+                    .resizable()
+                    .scaledToFit()
+                    .cornerRadius(12)
+            } else {
+                Text("Image unavailable")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, minHeight: 80)
+                    .background(Color(.systemGray6))
+                    .cornerRadius(12)
+            }
+        case .toggle:
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Button {
+                        page.blocks[index].isExpanded.toggle()
+                    } label: {
+                        Image(systemName: block.wrappedValue.isExpanded ? "chevron.down" : "chevron.right")
+                            .foregroundColor(.blue)
+                            .font(.subheadline)
+                            .frame(minWidth: 28, minHeight: 28)
+                    }
+                    .buttonStyle(.plain)
+                    TextField("Toggle title", text: block.content)
+                        .font(.headline)
+                }
+                if block.wrappedValue.isExpanded {
+                    TextEditor(text: block.detail)
+                        .frame(minHeight: 60)
+                        .scrollContentBackground(.hidden)
+                        .background(Color(.systemBackground))
+                        .cornerRadius(8)
+                }
+            }
+            .padding(10)
+            .background(Color(.systemGray6))
+            .cornerRadius(12)
         }
     }
 
@@ -325,15 +409,37 @@ struct PageView: View {
 
     // MARK: - Add Block
     private func addBlock() {
+        // Image blocks are added from the photo picker, not from typed content.
+        if selectedBlockType == .image {
+            showingImagePicker = true
+            return
+        }
+
         let trimmed = newContent.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty || selectedBlockType == .calendar else { return }
+        guard !trimmed.isEmpty || selectedBlockType == .calendar || selectedBlockType == .divider else { return }
         
         var newBlock = Block(id: UUID(), type: selectedBlockType)
-        if selectedBlockType != .calendar {
+        if selectedBlockType != .calendar && selectedBlockType != .divider {
             newBlock.content = trimmed
         }
         page.blocks.append(newBlock)
         newContent = ""
+    }
+
+    // MARK: - Image Block
+    /// Downscales an image to a max dimension of 1200px and compresses
+    /// it to JPEG, so image blocks stay small in the saved JSON.
+    private func downscaledJPEGData(from data: Data) -> Data? {
+        guard let image = UIImage(data: data) else { return nil }
+        let maxDimension: CGFloat = 1200
+        let longestSide = max(image.size.width, image.size.height)
+        let scale = min(1, maxDimension / longestSide)
+        let targetSize = CGSize(width: image.size.width * scale, height: image.size.height * scale)
+        let renderer = UIGraphicsImageRenderer(size: targetSize)
+        let resized = renderer.image { _ in
+            image.draw(in: CGRect(origin: .zero, size: targetSize))
+        }
+        return resized.jpegData(compressionQuality: 0.8)
     }
 
     // MARK: - Undo Snackbar
@@ -440,6 +546,11 @@ struct PageView: View {
         case .text: return "doc.text"
         case .todo: return "checklist"
         case .calendar: return "calendar"
+        case .quote: return "quote.opening"
+        case .code: return "chevron.left.forwardslash.chevron.right"
+        case .divider: return "minus"
+        case .image: return "photo"
+        case .toggle: return "list.bullet"
         }
     }
 }
