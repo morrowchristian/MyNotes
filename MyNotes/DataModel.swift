@@ -272,10 +272,15 @@ class AppData: ObservableObject {
     let undoManager = UndoManager()
 
     init() {
+        // syncManager is a let constant with no default value, so
+        // it must be assigned before any method on self is called —
+        // otherwise Swift reports "'self' used before all stored
+        // properties are initialized". attach(to:) stays last: it
+        // seeds the change hash from the data the loads just read.
+        syncManager = CloudKitSyncManager()
         loadData()
         loadFolders()
         loadTheme()
-        syncManager = CloudKitSyncManager()
         syncManager.attach(to: self)
     }
     
