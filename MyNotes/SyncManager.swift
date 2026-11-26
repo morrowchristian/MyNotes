@@ -50,9 +50,13 @@
 //
 //  THREADING: this class is a plain ObservableObject (like
 //  SidebarUndoCoordinator) and is only ever used from the main
-//  thread. CloudKit's async calls run inside MainActor.run at the
-//  Task entry points, so every mutation of published state and of
-//  AppData happens on the main thread.
+//  thread. The three async entry points (checkAvailabilityAndFetch,
+//  uploadIfNeeded, fetchRemoteAndDecide) are @MainActor-isolated, so
+//  awaiting them from a Task hops to the main actor and every
+//  mutation of published state and of AppData happens on the main
+//  thread. (MainActor.run cannot be used here: it takes a
+//  synchronous closure, so passing an async closure to it is a
+//  compile error — that was the original bug.)
 
 import CloudKit
 import Combine
@@ -195,7 +199,7 @@ final class CloudKitSyncManager: ObservableObject {
 
         Task { [weak self] in
             guard let self else { return }
-            await MainActor.run { await self.checkAvailabilityAndFetch() }
+            await self.checkAvailabilityAndFetch()
         }
     }
 
@@ -229,7 +233,7 @@ final class CloudKitSyncManager: ObservableObject {
     private func beginUpload() {
         Task { [weak self] in
             guard let self else { return }
-            await MainActor.run { await self.uploadIfNeeded() }
+            await self.uploadIfNeeded()
         }
     }
 
@@ -241,12 +245,12 @@ final class CloudKitSyncManager: ObservableObject {
     func syncNow() {
         Task { [weak self] in
             guard let self else { return }
-            await MainActor.run { await self.fetchRemoteAndDecide() }
+            await self.fetchRemoteAndDecide()
         }
     }
 
     // MARK: - Availability + fetch
-    private func checkAvailabilityAndFetch() async {
+    @MainActor private func checkAvailabilityAndFetch() async {
         await refreshAvailability()
         guard isAvailable else { return }
         await fetchRemoteAndDecide()
@@ -272,7 +276,7 @@ final class CloudKitSyncManager: ObservableObject {
     /// Uploads the current local dataset if it differs from the last
     /// synced snapshot. Called after the debounce, on first sync, and
     /// when the fetch step decides the local copy is newer.
-    private func uploadIfNeeded() async {
+    @MainActor private func uploadIfNeeded() async {
         guard !uploadInFlight else { return }
         guard let appData else { return }
         guard let contentHash = currentContentHash(), contentHash != lastSyncedHash else { return }
@@ -349,7 +353,7 @@ final class CloudKitSyncManager: ObservableObject {
     ///   server modification date vs local last-change date).
     /// A missing, corrupt, or unreadable remote snapshot never
     /// touches local data.
-    private func fetchRemoteAndDecide() async {
+    @MainActor private func fetchRemoteAndDecide() async {
         guard appData != nil else { return }
         guard isAvailable else {
             await refreshAvailability()
