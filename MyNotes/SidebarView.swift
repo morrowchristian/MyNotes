@@ -169,6 +169,9 @@ struct SidebarView: View {
     // View-only state — it does not change the data or the selection.
     @State private var selectedTag: String? = nil
 
+    // Whether the Appearance (theme) settings sheet is showing.
+    @State private var showingThemeSettings = false
+
     /// Every tag in use across pages, sorted alphabetically, deduped.
     /// The filter chips are derived from the current pages, so a tag
     /// that no longer exists on any page disappears on its own.
@@ -343,6 +346,19 @@ struct SidebarView: View {
             }
         }
         .navigationTitle("Workspace")
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Button {
+                    showingThemeSettings = true
+                } label: {
+                    Image(systemName: "gearshape")
+                }
+                .accessibilityLabel("Appearance settings")
+            }
+        }
+        .sheet(isPresented: $showingThemeSettings) {
+            ThemeSettingsView(appData: appData)
+        }
     }
 
     // MARK: - Tag Filter
@@ -388,7 +404,7 @@ struct SidebarView: View {
                 .font(.caption)
                 .padding(.horizontal, 10)
                 .padding(.vertical, 5)
-                .background(isSelected ? Color.blue : Color(.systemGray5))
+                .background(isSelected ? appData.theme.accentColor : Color(.systemGray5))
                 .foregroundStyle(isSelected ? .white : .primary)
                 .cornerRadius(12)
         }
@@ -403,6 +419,7 @@ struct SidebarView: View {
         NavigationLink(value: page.id) {
             VStack(alignment: .leading) {
                 Text(page.title)
+                    .themeFont(.body, theme: appData.theme)
                 Text(AppData.formatTimestamp(page.createdAt))
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -483,7 +500,7 @@ struct SidebarView: View {
                 appData.undoManager.undo()
             }
             .font(.subheadline).bold()
-            .foregroundColor(.blue)
+            .foregroundColor(appData.theme.accentColor)
         }
         .padding()
         .background(Color(.systemGray6))
@@ -491,5 +508,68 @@ struct SidebarView: View {
         .shadow(radius: 8)
         .padding(.horizontal)
         .padding(.bottom, 20)
+    }
+}
+
+// MARK: - Theme Settings Sheet
+/// Settings sheet for the app theme: accent color + font style.
+/// Changes apply immediately (the theme is @Published on AppData,
+/// so the UI updates live) and persist to UserDefaults via the
+/// theme's didSet. Reached from the gear button in the sidebar
+/// toolbar.
+struct ThemeSettingsView: View {
+    @ObservedObject var appData: AppData
+    @Environment(\.dismiss) var dismiss
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Accent Color") {
+                    HStack(spacing: 16) {
+                        ForEach(ThemeAccent.allCases, id: \.self) { accent in
+                            Button {
+                                appData.theme.accent = accent
+                            } label: {
+                                ZStack {
+                                    Circle()
+                                        .fill(accent.color)
+                                        .frame(width: 32, height: 32)
+                                    if appData.theme.accent == accent {
+                                        Image(systemName: "checkmark")
+                                            .foregroundColor(.white)
+                                            .font(.caption.bold())
+                                    }
+                                }
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityLabel(accent.displayName)
+                        }
+                    }
+                    .padding(.vertical, 4)
+                }
+                Section("Font Style") {
+                    Picker("Font Style", selection: $appData.theme.font) {
+                        ForEach(ThemeFont.allCases, id: \.self) { font in
+                            Text(font.displayName).tag(font)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                }
+                Section {
+                    Button("Reset to Default") {
+                        appData.theme = .standard
+                    }
+                    .foregroundStyle(.red)
+                } footer: {
+                    Text("Default: blue accent, System font.")
+                }
+            }
+            .navigationTitle("Appearance")
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { dismiss() }
+                }
+            }
+        }
     }
 }

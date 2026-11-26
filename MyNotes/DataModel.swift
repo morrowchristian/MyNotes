@@ -1,6 +1,7 @@
 //  DataModel.swift
 import Foundation
 import Combine
+import SwiftUI
 
 enum BlockType: String, Codable, CaseIterable {
     case text
@@ -157,6 +158,98 @@ struct Folder: Identifiable, Codable, Equatable {
     var isExpanded: Bool
 }
 
+// MARK: - App Theme
+/// The accent color of the app, stored by name (e.g. "blue") so it
+/// encodes cleanly to JSON. The six colors are the same palette as
+/// the calendar event colors, so a theme accent can double as the
+/// default color for a new calendar event.
+enum ThemeAccent: String, Codable, CaseIterable {
+    case blue
+    case green
+    case orange
+    case red
+    case purple
+    case pink
+
+    var displayName: String { rawValue.capitalized }
+
+    /// The SwiftUI color for this accent.
+    var color: Color {
+        switch self {
+        case .blue: return .blue
+        case .green: return .green
+        case .orange: return .orange
+        case .red: return .red
+        case .purple: return .purple
+        case .pink: return .pink
+        }
+    }
+
+    /// The calendar event color matching this accent (same six
+    /// colors), used as the default color for a new calendar event.
+    var eventColor: EventColor {
+        switch self {
+        case .blue: return .blue
+        case .green: return .green
+        case .orange: return .orange
+        case .red: return .red
+        case .purple: return .purple
+        case .pink: return .pink
+        }
+    }
+}
+
+/// The font style of the app, stored by name (e.g. "serif") so it
+/// encodes cleanly to JSON.
+enum ThemeFont: String, Codable, CaseIterable {
+    case system
+    case serif
+    case rounded
+
+    var displayName: String {
+        switch self {
+        case .system: return "System"
+        case .serif: return "Serif"
+        case .rounded: return "Rounded"
+        }
+    }
+
+    /// The SwiftUI font design for this style.
+    var design: Font.Design {
+        switch self {
+        case .system: return .default
+        case .serif: return .serif
+        case .rounded: return .rounded
+        }
+    }
+}
+
+/// The app theme: one accent color + one font style for the whole
+/// app (global, not per-page). Stored by name so it encodes cleanly
+/// to JSON. `AppTheme()` is the default (blue accent, System font).
+struct AppTheme: Codable, Equatable {
+    var accent: ThemeAccent = .blue
+    var font: ThemeFont = .system
+
+    /// The default theme: blue accent, System font.
+    static let standard = AppTheme()
+
+    /// The SwiftUI accent color for this theme.
+    var accentColor: Color { accent.color }
+
+    /// The SwiftUI font design for this theme.
+    var fontDesign: Font.Design { font.design }
+}
+
+extension View {
+    /// Applies a font at the given text style using the theme's font
+    /// design, so the font choice is applied consistently wherever
+    /// the theme font is used.
+    func themeFont(_ style: Font.TextStyle, theme: AppTheme) -> some View {
+        font(.system(style, design: theme.fontDesign))
+    }
+}
+
 class AppData: ObservableObject {
     @Published var pages: [Page] = [] {
         didSet { saveData() }
@@ -165,12 +258,17 @@ class AppData: ObservableObject {
     @Published var folders: [Folder] = [] {
         didSet { saveFolders() }
     }
+
+    @Published var theme: AppTheme = .standard {
+        didSet { saveTheme() }
+    }
     
     let undoManager = UndoManager()
     
     init() {
         loadData()
         loadFolders()
+        loadTheme()
     }
     
     func saveData() {
@@ -253,6 +351,21 @@ class AppData: ObservableObject {
     func renameFolder(id: UUID, to name: String) {
         guard let index = folders.firstIndex(where: { $0.id == id }) else { return }
         folders[index].name = name
+    }
+
+    // MARK: - Theme
+    func saveTheme() {
+        guard let encoded = try? JSONEncoder().encode(theme) else { return }
+        UserDefaults.standard.set(encoded, forKey: "appTheme")
+    }
+
+    /// Loads the theme. Data saved before themes existed has no
+    /// "appTheme" key, so the theme stays the default (blue accent,
+    /// System font). A corrupt value is ignored the same way.
+    func loadTheme() {
+        guard let data = UserDefaults.standard.data(forKey: "appTheme"),
+              let decoded = try? JSONDecoder().decode(AppTheme.self, from: data) else { return }
+        theme = decoded
     }
     
     static func formatTimestamp(_ date: Date) -> String {
