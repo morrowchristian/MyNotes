@@ -125,7 +125,7 @@ struct PageView: View {
                     .bold()
                 Text("Created: \(AppData.formatTimestamp(page.createdAt))")
                     .font(.subheadline)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Color.appMutedText)
             }
             .padding(.horizontal)
             .padding(.top, 8)
@@ -286,7 +286,7 @@ struct PageView: View {
                         } label: {
                             Image(systemName: "xmark")
                                 .font(.caption2)
-                                .foregroundStyle(.secondary)
+                                .foregroundStyle(Color.appMutedText)
                         }
                         .buttonStyle(.plain)
                     }
@@ -334,7 +334,7 @@ struct PageView: View {
                 TextEditor(text: block.content)
                     .themeFont(.body, theme: appData.theme)
                     .frame(minHeight: 100)
-                    .background(Color(.systemGray6))
+                    .background(Color.appCardBackground)
                     .cornerRadius(12)
                     .padding(4)
                     .focused($focusedTextBlockID, equals: block.wrappedValue.id)
@@ -373,7 +373,7 @@ struct PageView: View {
                     .scrollContentBackground(.hidden)
             }
             .padding(10)
-            .background(Color(.systemGray6))
+            .background(Color.appCardBackground)
             .cornerRadius(12)
         case .code:
             TextEditor(text: block.content)
@@ -397,9 +397,9 @@ struct PageView: View {
             } else {
                 Text("Image unavailable")
                     .font(.subheadline)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Color.appMutedText)
                     .frame(maxWidth: .infinity, minHeight: 80)
-                    .background(Color(.systemGray6))
+                    .background(Color.appCardBackground)
                     .cornerRadius(12)
             }
         case .toggle:
@@ -426,7 +426,7 @@ struct PageView: View {
                 }
             }
             .padding(10)
-            .background(Color(.systemGray6))
+            .background(Color.appCardBackground)
             .cornerRadius(12)
         case .link:
             linkBlockView(block: block)
@@ -463,7 +463,7 @@ struct PageView: View {
                 ForEach(["S", "M", "T", "W", "T", "F", "S"], id: \.self) { day in
                     Text(day)
                         .font(.caption)
-                        .foregroundColor(.secondary)
+                        .foregroundColor(Color.appMutedText)
                 }
                 ForEach(days, id: \.self) { date in
                     if let date = date {
@@ -474,6 +474,8 @@ struct PageView: View {
                             VStack(spacing: 3) {
                                 Text("\(Calendar.current.component(.day, from: date))")
                                     .font(.system(size: 16))
+                                    .fontWeight(isToday(date) ? .bold : .regular)
+                                    .foregroundStyle(.primary)
                                 if let event = event {
                                     Circle().fill(event.color.color).frame(width: 8, height: 8)
                                 }
@@ -481,7 +483,7 @@ struct PageView: View {
                             .frame(maxWidth: .infinity, minHeight: 54)
                             .background(
                                 RoundedRectangle(cornerRadius: 10)
-                                    .fill(isToday(date) ? Color.blue.opacity(0.2) : Color.clear)
+                                    .fill(isToday(date) ? Color.appTodayHighlight : Color.clear)
                             )
                         }
                     } else {
@@ -507,7 +509,7 @@ struct PageView: View {
                     HStack {
                         Circle().fill(event.color.color).frame(width: 8, height: 8)
                         Text(date.formatted(date: .abbreviated, time: .omitted))
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(Color.appMutedText)
                         Text(event.text)
                         Spacer()
                         Button("Edit") {
@@ -520,7 +522,7 @@ struct PageView: View {
             }
         }
         .padding()
-        .background(Color(.systemGray6))
+        .background(Color.appCardBackground)
         .cornerRadius(16)
     }
 
@@ -539,7 +541,7 @@ struct PageView: View {
                 } label: {
                     Image(systemName: "xmark")
                         .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(Color.appMutedText)
                 }
                 .buttonStyle(.borderless)
             }
@@ -558,7 +560,7 @@ struct PageView: View {
             }
         }
         .padding(12)
-        .background(Color(.systemBackground))
+        .background(Color.appElevatedBackground)
         .cornerRadius(12)
     }
 
@@ -624,23 +626,23 @@ struct PageView: View {
                     Spacer()
                     Image(systemName: "chevron.right")
                         .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(Color.appMutedText)
                 }
                 .padding(12)
-                .background(Color(.systemGray6))
+                .background(Color.appCardBackground)
                 .cornerRadius(12)
             }
             .buttonStyle(.plain)
         } else {
             HStack(spacing: 8) {
                 Image(systemName: "link")
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Color.appMutedText)
                 Text("\(block.wrappedValue.content) (deleted)")
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Color.appMutedText)
                 Spacer()
             }
             .padding(12)
-            .background(Color(.systemGray6))
+            .background(Color.appCardBackground)
             .cornerRadius(12)
         }
     }
@@ -708,7 +710,7 @@ struct PageView: View {
                     } label: {
                         HStack {
                             Image(systemName: "link")
-                                .foregroundStyle(.secondary)
+                                .foregroundStyle(Color.appMutedText)
                             Text(target.title)
                                 .foregroundStyle(.primary)
                             Spacer()
@@ -886,7 +888,7 @@ struct PagePickerSheet: View {
             Group {
                 if pages.isEmpty {
                     Text("No other pages to link to yet.")
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(Color.appMutedText)
                         .padding()
                 } else {
                     List(pages) { target in
@@ -896,7 +898,7 @@ struct PagePickerSheet: View {
                         } label: {
                             HStack {
                                 Image(systemName: "link")
-                                    .foregroundStyle(.secondary)
+                                    .foregroundStyle(Color.appMutedText)
                                 Text(target.title)
                                     .foregroundStyle(.primary)
                                 Spacer()

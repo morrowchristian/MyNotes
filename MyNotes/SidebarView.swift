@@ -177,6 +177,12 @@ struct SidebarView: View {
     // Whether the Appearance (theme) settings sheet is showing.
     @State private var showingThemeSettings = false
 
+    // Dark-mode polish (roadmap item 11): the sidebar background
+    // is true black in dark mode only. Light mode gets no background
+    // modifier at all (Color.clear is transparent), so the sidebar
+    // looks exactly as it did before.
+    @Environment(\.colorScheme) private var colorScheme
+
     /// Every tag in use across pages, sorted alphabetically, deduped.
     /// The filter chips are derived from the current pages, so a tag
     /// that no longer exists on any page disappears on its own.
@@ -268,7 +274,7 @@ struct SidebarView: View {
                 List(selection: $selectedPageID) {
                     if isSearching && visibleUngroupedPages.isEmpty && visibleFolders.isEmpty {
                         Text("No pages match \"\(searchQuery)\"")
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(Color.appMutedText)
                     }
 
                     if !visibleUngroupedPages.isEmpty {
@@ -372,6 +378,7 @@ struct SidebarView: View {
                 } message: {
                     Text("Enter a new name for the folder.")
                 }
+                .scrollContentBackground(colorScheme == .dark ? .hidden : .automatic)
             }
 
             // Undo Snackbar
@@ -381,6 +388,7 @@ struct SidebarView: View {
                     .zIndex(1)
             }
         }
+        .background(colorScheme == .dark ? Color.black : Color.clear)
         .navigationTitle("Workspace")
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
@@ -409,7 +417,7 @@ struct SidebarView: View {
     private var searchField: some View {
         HStack(spacing: 8) {
             Image(systemName: "magnifyingglass")
-                .foregroundStyle(.secondary)
+                .foregroundStyle(Color.appMutedText)
             TextField("Search pages", text: $searchText)
                 .textFieldStyle(.plain)
                 .autocorrectionDisabled()
@@ -419,7 +427,7 @@ struct SidebarView: View {
                     searchText = ""
                 } label: {
                     Image(systemName: "xmark.circle.fill")
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(Color.appMutedText)
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("Clear search")
@@ -460,7 +468,7 @@ struct SidebarView: View {
                 HStack(spacing: 8) {
                     Text("Filtered by #\(tag)")
                         .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(Color.appMutedText)
                     Button("Clear") { selectedTag = nil }
                         .font(.caption)
                 }
@@ -497,7 +505,7 @@ struct SidebarView: View {
                     .themeFont(.body, theme: appData.theme)
                 Text(AppData.formatTimestamp(page.createdAt))
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Color.appMutedText)
             }
         }
         .swipeActions(edge: .trailing, allowsFullSwipe: false) {
@@ -534,15 +542,15 @@ struct SidebarView: View {
             HStack {
                 Image(systemName: folder.isExpanded ? "chevron.down" : "chevron.right")
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Color.appMutedText)
                 Image(systemName: "folder")
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Color.appMutedText)
                 Text(folder.name)
                     .font(.headline)
                 Spacer()
                 Text("\(visibleFolderPages(folder).count)")
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Color.appMutedText)
             }
         }
         .buttonStyle(.plain)
@@ -650,7 +658,7 @@ struct ThemeSettingsView: View {
                 Section {
                     Text(syncManager.statusText)
                         .font(.subheadline)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(Color.appMutedText)
                     Button("Sync Now") {
                         syncManager.syncNow()
                     }
